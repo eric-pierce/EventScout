@@ -1,10 +1,12 @@
 # EventScout
 
+<img width="1202" height="775" alt="eventscout" src="https://github.com/user-attachments/assets/22e15b47-4815-4328-9192-5cc52022ee13" />
+
 A self-hosted service that periodically gathers local events from known sources and aggregators, discovers new
 sources on its own, filters and ranks everything against your interests, and delivers the result as a web dashboard,
 an email digest, and subscribable calendar (.ics) feeds.
 
-Configured out of the box for Newton, MA / Greater Boston.
+Configured out of the box for Greater Boston.
 
 ## How it works
 
