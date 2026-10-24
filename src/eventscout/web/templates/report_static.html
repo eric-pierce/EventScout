@@ -1,0 +1,26 @@
+{% from "_macros.html" import event_card %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EventScout Picks</title>
+  <style>{{ inline_css() }}</style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ base_url }}/"><span class="logo">E</span>EventScout</a>
+    <span class="muted">Generated {{ generated.strftime('%a %b %-d, %-I:%M %p') }}</span>
+  </header>
+  <main class="page narrow">
+    <div class="list-head">
+      <h1>Picked for you</h1>
+      <span class="muted">{{ count }} events near {{ cfg.home.label }} ·
+        <a href="{{ webcal_url }}">Subscribe</a> · <a href="{{ ics_url }}">Download .ics</a> · <a href="{{ base_url }}/">Open dashboard</a></span>
+    </div>
+    {% for g in groups %}
+      <h2 class="day">{{ g.label }}</h2>
+      {% for e in g.events %}{{ event_card(e, interactive=False, base_url=base_url) }}{% endfor %}
+    {% endfor %}
+  </main>
+</body>
+</html>

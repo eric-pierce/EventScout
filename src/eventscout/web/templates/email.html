@@ -1,0 +1,47 @@
+<!doctype html>
+<html>
+<body style="margin:0;padding:0;background:#f6f4f1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1c1917;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f4f1;">
+<tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:12px;border:1px solid #e7e5e4;">
+  <tr><td style="padding:24px 24px 8px;">
+    <div style="font-size:13px;font-weight:700;color:#c2410c;letter-spacing:.04em;text-transform:uppercase;">EventScout</div>
+    <div style="font-size:22px;font-weight:700;margin-top:4px;">{{ count }} events picked for you</div>
+    <div style="font-size:13px;color:#78716c;margin-top:6px;">
+      Near {{ cfg.home.label }} · next {{ cfg.search.horizon_days }} days ·
+      <a href="{{ base_url }}/" style="color:#c2410c;">Dashboard</a> ·
+      <a href="{{ webcal_url }}" style="color:#c2410c;">Subscribe to calendar</a> ·
+      <a href="{{ ics_url }}" style="color:#c2410c;">Download .ics</a>
+    </div>
+  </td></tr>
+  {% for g in groups %}
+  <tr><td style="padding:18px 24px 4px;font-size:12px;font-weight:700;color:#57534e;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #f0eeec;">{{ g.label }}</td></tr>
+    {% for e in g.events %}
+    <tr><td style="padding:12px 24px;border-bottom:1px solid #f5f5f4;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td valign="top" style="width:92px;font-size:13px;color:#57534e;padding-right:10px;">{{ e | event_time }}</td>
+        <td valign="top" style="width:64px;padding-right:12px;">
+          {% if e.image_url %}<img src="{{ e.image_url }}" width="64" height="64" alt="" style="display:block;width:64px;height:64px;object-fit:cover;border-radius:8px;background:#f0eeec;">
+          {% else %}<div style="width:64px;height:64px;border-radius:8px;background:#ffedd5;color:#9a3412;font-weight:700;font-size:22px;line-height:64px;text-align:center;">{{ ((e.tags or e.categories or [e.title])[0] or '?')[:1] | upper }}</div>{% endif %}
+        </td>
+        <td valign="top">
+          <div style="font-size:15px;font-weight:600;line-height:1.3;">
+            {% if e.url %}<a href="{{ e.url }}" style="color:#1c1917;text-decoration:none;">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}
+            {% if e.score is not none %}<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:9px;background:#ffedd5;color:#9a3412;font-size:11px;font-weight:700;">{{ e.score }}</span>{% endif %}
+          </div>
+          <div style="font-size:13px;color:#57534e;margin-top:3px;">
+            {{ e.location_display }}{% if e.distance_miles is not none %} · {{ '%.1f' % e.distance_miles }} mi{% if e.drive_minutes %} (~{{ e.drive_minutes | round | int }} min){% endif %}{% endif %} · {{ e.cost_display }}
+          </div>
+          {% if e.score_reason %}<div style="font-size:13px;color:#78716c;margin-top:4px;font-style:italic;">{{ e.score_reason }}</div>{% endif %}
+          <div style="font-size:12px;margin-top:6px;"><a href="{{ base_url }}/events/{{ e.id }}.ics{% if cfg.report.feed_token %}?token={{ cfg.report.feed_token | urlencode }}{% endif %}" style="color:#c2410c;">Add to calendar</a></div>
+        </td>
+      </tr></table>
+    </td></tr>
+    {% endfor %}
+  {% endfor %}
+  <tr><td style="padding:18px 24px;font-size:12px;color:#a8a29e;">Rate events on the dashboard to tune future picks. An .ics file with all of these is attached.</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

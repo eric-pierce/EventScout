@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% set active = 'runs' %}
+{% block title %}Runs · EventScout{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="list-head"><h1>Run history</h1></div>
+  {% for r in runs %}
+  <details class="run st-{{ r.status }}" {% if loop.first %}open{% endif %}>
+    <summary>
+      <span class="pill {{ r.status }}">{{ r.status }}</span>
+      <b>{{ r.kind }}</b>
+      <span>{{ r.started_at | ts }}</span>
+      {% set st = r.stats %}
+      {% if st.fetch %}<span class="muted">{{ st.fetch.sources }} sources · {{ st.fetch.unique_events }} events</span>{% endif %}
+      {% if st.report %}<span class="muted">{{ st.report.recommended }} picks</span>{% endif %}
+      {% if st.llm %}<span class="muted">{{ st.llm.provider }}: {{ st.llm.calls }} calls, {{ '{:,}'.format(st.llm.input_tokens) }} in / {{ '{:,}'.format(st.llm.output_tokens) }} out tokens{% if st.llm.web_searches %}, {{ st.llm.web_searches }} searches{% endif %}</span>{% endif %}
+      {% if st.seconds %}<span class="muted">{{ st.seconds }}s</span>{% endif %}
+    </summary>
+    <pre>{{ r.log }}</pre>
+  </details>
+  {% else %}
+  <p class="muted">No runs yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

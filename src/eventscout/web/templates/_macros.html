@@ -1,0 +1,40 @@
+{% macro event_card(e, interactive=True, base_url="") -%}
+<article class="event{% if e.starred %} is-starred{% endif %}{% if e.feedback < 0 %} is-hidden{% endif %}" id="event-{{ e.id }}" data-id="{{ e.id }}">
+  <div class="event-time">
+    <span class="time">{{ e | event_time }}</span>
+    {% if e.score is not none %}<span class="score s{{ (e.score // 20) * 20 }}" title="Match score">{{ e.score }}</span>{% endif %}
+  </div>
+  {% set initial = ((e.tags or e.categories or [e.title])[0] or '?')[:1] | upper %}
+  <a class="thumb{% if not e.image_url %} empty{% endif %}" {% if e.url %}href="{{ e.url }}" target="_blank" rel="noopener"{% endif %} aria-hidden="true" tabindex="-1">
+    {% if e.image_url %}<img src="{{ e.image_url }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.classList.add('empty');this.remove()">{% endif %}
+    <span class="thumb-fallback">{{ initial }}</span>
+  </a>
+  <div class="event-body">
+    <h3 class="event-title">
+      {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}
+    </h3>
+    <div class="meta">
+      <span class="where">{{ e.location_display }}</span>
+      {% if e.distance_miles is not none %}
+        <span class="dot">·</span><span class="dist" title="{{ 'Approximate (city-level) location' if e.location_approx else 'Straight-line distance from home' }}">{{ '%.1f' % e.distance_miles }} mi{% if e.location_approx %}≈{% endif %}</span>
+        {% if e.drive_minutes %}<span class="drive">~{{ e.drive_minutes | round | int }} min drive</span>{% endif %}
+      {% endif %}
+      <span class="dot">·</span><span class="cost{% if e.is_free %} free{% endif %}">{{ e.cost_display }}</span>
+    </div>
+    {% if e.score_reason %}<p class="reason">{{ e.score_reason }}</p>{% endif %}
+    {% if e.filter_reason %}<p class="reason filtered">Excluded: {{ e.filter_reason }}</p>{% endif %}
+    <div class="foot">
+      {% for t in e.tags %}<a class="tag" href="{{ base_url }}/?tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}
+      <span class="via">via {{ e.source_names | join(', ') }}</span>
+    </div>
+  </div>
+  {% if interactive %}
+  <div class="actions">
+    <button class="act star{% if e.starred %} on{% endif %}" data-action="star" title="Going — adds to your 'going' calendar" aria-label="Star">★</button>
+    <button class="act up{% if e.feedback > 0 %} on{% endif %}" data-action="up" title="More like this" aria-label="Like">▲</button>
+    <button class="act down{% if e.feedback < 0 %} on{% endif %}" data-action="down" title="Not interested (hides it and teaches the ranker)" aria-label="Not interested">▼</button>
+    <a class="act" href="/events/{{ e.id }}.ics" title="Download .ics" aria-label="Add to calendar">＋</a>
+  </div>
+  {% endif %}
+</article>
+{%- endmacro %}

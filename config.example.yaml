@@ -1,0 +1,173 @@
+# EventScout configuration. Copy to config.yaml and edit.
+# ${VAR} / ${VAR:-default} pull values from the environment (.env when using docker compose).
+
+home:
+  label: "Newton, MA"
+  latitude: 42.3370
+  longitude: -71.2092
+  timezone: America/New_York
+  city: Newton
+  region: Massachusetts
+  country: US
+  nearby: [Boston, Cambridge, Somerville, Brookline, Waltham, Watertown, Needham, Wellesley]
+
+search:
+  horizon_days: 21          # how far ahead to look
+  max_distance_miles: 25    # straight-line from home; Boston/Cambridge are ~8-10 mi
+  max_drive_minutes: 50     # applied when a drive time is known (OSRM); null to disable
+  include_online: false
+  max_price: 150            # null = no limit
+
+# --- What you like -----------------------------------------------------------
+# EDIT ME. These drive the LLM ranking. Weight 1-5 (5 = love it). Thumbs up/down in the
+# dashboard teach it further. Changing this section re-scores upcoming events on the next run.
+profile:
+  min_score: 60             # events scoring below this are left out of picks/email/calendar
+  interests:
+    - { topic: "live music in small venues (indie, folk, jazz)", weight: 5 }
+    - { topic: "comedy and improv shows", weight: 4 }
+    - { topic: "food and drink festivals, beer/wine tastings", weight: 4 }
+    - { topic: "outdoor activities: guided hikes, bike rides, nature walks", weight: 4 }
+    - { topic: "tech meetups, hackathons, maker events", weight: 3 }
+    - { topic: "museum exhibitions and gallery openings", weight: 3 }
+    - { topic: "author talks and lectures on science or history", weight: 3 }
+    - { topic: "trivia nights and board game events", weight: 2 }
+    - { topic: "big yard/garage sales, estate sales, citywide yard sale days, flea and vintage markets, record fairs, rummage and salvage sales", weight: 4 }
+  dislikes:
+    - children's storytime and toddler programs
+    - networking mixers and sales pitches
+    - religious services
+    - real-estate or investment seminars
+  exclude_keywords:          # hard filter on title/description (whole words, case-insensitive)
+    - toddler
+    - storytime
+    - webinar
+    - open house
+  notes: |
+    Weeknights I can only do events starting after 6pm. Weekends anytime.
+    Prefer smaller, local, one-off events over big touring arena shows.
+
+# --- LLM -------------------------------------------------------------------------
+llm:
+  provider: claude          # claude | ollama
+  claude:
+    model: claude-opus-5    # set claude-sonnet-5 or claude-haiku-4-5 to cut cost
+    effort_extract: low
+    effort_score: low
+    effort_discover: high
+    fallbacks: default      # server-side refusal fallback; null to disable
+    max_web_searches: 12
+  ollama:
+    base_url: http://ollama:11434
+    model: qwen3:14b        # any model that handles JSON well; 14B+ recommended
+    num_ctx: 32768
+    think: false
+  score_batch_size: 20
+  max_scored_per_run: 1500  # cost guard; first run sees ~2k listings, later runs only new ones
+  extract_chunk_chars: 24000
+
+# --- Finding new sources ------------------------------------------------------------
+discovery:
+  enabled: true
+  search_backend: auto      # auto = Claude web search if provider is claude, else SearXNG
+  searxng_url: http://searxng:8080
+  schedule: "0 5 * * 0"     # Sundays 5am
+  max_candidates_per_run: 10
+  min_events_to_accept: 2
+  trial_runs: 3
+
+fetch:
+  user_agent: "EventScout/0.1 (self-hosted personal event finder)"
+  respect_robots: true
+  per_domain_delay_seconds: 1.5
+  max_llm_chunks_per_page: 4
+  concurrency: 6
+  browserless_url: ${BROWSERLESS_URL:-}     # e.g. http://browserless:3000 (compose profile "browser")
+  browserless_token: ${BROWSERLESS_TOKEN:-}
+
+geocoding:
+  nominatim_url: https://nominatim.openstreetmap.org
+  osrm_url: https://router.project-osrm.org   # public demo server; null to skip drive times
+  max_geocodes_per_run: 200
+
+schedule:
+  run: "0 6 * * *"          # daily at 6am (home timezone)
+  run_on_startup: false
+
+report:
+  output_dir: /data/output
+  public_base_url: ${PUBLIC_BASE_URL:-http://localhost:8080}
+  feed_token: ${EVENTSCOUT_FEED_TOKEN:-}     # required on calendar feed URLs when set
+  max_events: 200
+  enrich_per_run: 25        # visit detail pages of top picks missing a time or price
+  images_per_run: 80        # fetch event pages' preview image (og:image) for picks without one
+
+email:
+  enabled: ${EMAIL_ENABLED:-false}
+  smtp_host: ${SMTP_HOST:-}
+  smtp_port: ${SMTP_PORT:-587}
+  username: ${SMTP_USERNAME:-}
+  password: ${SMTP_PASSWORD:-}
+  starttls: true
+  sender: ${EMAIL_FROM:-}
+  recipients: [ "${EMAIL_TO:-}" ]
+  subject: "EventScout: {count} events picked for you"
+  only_new: false           # true = only email events first seen since the last email
+
+web:
+  host: 0.0.0.0
+  port: 8080
+  username: ${WEB_USERNAME:-}   # set both to require HTTP basic auth on the dashboard
+  password: ${WEB_PASSWORD:-}
+
+# --- Seed sources ------------------------------------------------------------------
+# kind: auto | web | jsonld | ical | rss | localist | ticketmaster | bostonshows
+# web = schema.org JSON-LD when the page has it, otherwise LLM reads the page.
+# options: pages/page_param (pagination), extra_urls, render (headless browser), force_llm
+sources:
+  - name: Boston Shows (live music)
+    url: https://bostonshows.org/
+    kind: bostonshows
+  - name: do617
+    url: https://do617.com/events/concerts/today
+    kind: web
+    options:                 # JS-rendered: needs the browserless service (compose profile "browser")
+      render: true
+      extra_urls:            # do617's per-category "today" pages; a daily run picks up that day's listings
+        - https://do617.com/events/comedy/today
+        - https://do617.com/events/food-drink/today
+        - https://do617.com/events/game-nights-trivia/today
+        - https://do617.com/events/film-theatre-performing-arts/today
+  - name: The Boston Calendar
+    url: https://www.thebostoncalendar.com/
+    kind: auto            # behind a Cloudflare bot challenge; auto-disables if it stays blocked
+  - name: Eventbrite — Boston
+    url: https://www.eventbrite.com/d/ma--boston/all-events/
+    kind: web
+    options: { pages: 3 }
+  - name: Eventbrite — Newton
+    url: https://www.eventbrite.com/d/ma--newton/all-events/
+    kind: web
+  - name: Meetup — Boston
+    url: https://www.meetup.com/find/?location=us--ma--Boston&source=EVENTS
+    kind: web
+  - name: AllEvents — Boston
+    url: https://allevents.in/boston
+    kind: web
+  - name: ArtsBoston calendar
+    url: https://calendar.artsboston.org/
+    kind: web
+  - name: Harvard Gazette events
+    url: https://www.trumba.com/calendars/gazette.ics
+    kind: ical
+  - name: MIT events
+    url: https://calendar.mit.edu
+    kind: localist
+  - name: Northeastern events
+    url: https://calendar.northeastern.edu
+    kind: localist
+  - name: Ticketmaster (25 mi)
+    url: https://app.ticketmaster.com/discovery/v2/events.json
+    kind: ticketmaster
+    enabled: false        # get a free key at developer.ticketmaster.com, set TICKETMASTER_API_KEY, then enable
+    options: { api_key: "${TICKETMASTER_API_KEY:-}" }

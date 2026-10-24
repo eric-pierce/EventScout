@@ -1,0 +1,56 @@
+services:
+  eventscout:
+    build: .
+    image: eventscout:latest
+    container_name: eventscout
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    environment:
+      TZ: America/New_York
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - ./data:/data
+
+  # --- Optional services (enable with --profile) --------------------------------
+
+  # Local LLM: `docker compose --profile local-llm up -d`, then
+  #   docker compose exec ollama ollama pull qwen3:14b
+  # and set llm.provider: ollama in config.yaml.
+  # For NVIDIA GPUs uncomment the deploy block.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: [local-llm]
+    restart: unless-stopped
+    volumes:
+      - ollama:/root/.ollama
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  # Self-hosted metasearch used for source discovery when not using Claude web search.
+  searxng:
+    image: searxng/searxng:latest
+    profiles: [search, local-llm]
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-please}
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+  # Headless Chrome for JS-rendered calendars (sources with options: { render: true }).
+  # Set BROWSERLESS_URL=http://browserless:3000 and BROWSERLESS_TOKEN in .env.
+  browserless:
+    image: ghcr.io/browserless/chromium:latest
+    profiles: [browser]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # localhost only, for running EventScout outside Docker
+    environment:
+      TOKEN: ${BROWSERLESS_TOKEN:-}
+      CONCURRENT: 2
+
+volumes:
+  ollama:

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% set active = 'sources' %}
+{% block title %}Sources · EventScout{% endblock %}
+{% block content %}
+<div class="page">
+  <div class="list-head">
+    <h1>Sources</h1>
+    <div class="actions-row">
+      <button class="btn" id="discover-now" {% if running %}disabled{% endif %} title="Search the web for new event sources, then run">Discover new sources</button>
+    </div>
+  </div>
+  <form class="add-source" id="add-source">
+    <input type="url" name="url" placeholder="https://… calendar page, .ics feed, RSS feed" required>
+    <input type="text" name="name" placeholder="Name (optional)">
+    <button class="btn primary" type="submit">Add source</button>
+    <span class="muted" id="add-status"></span>
+  </form>
+  <p class="muted">Kinds: <b>web</b> reads schema.org data or has the LLM read the page · <b>ical</b>/<b>rss</b> feeds · <b>localist</b>/<b>ticketmaster</b> APIs. Discovered sources start as <b>trial</b> and are promoted once they produce an event you'd like, or retired after {{ cfg.discovery.trial_runs }} runs without one.</p>
+  <div class="table-wrap">
+  <table class="sources">
+    <thead><tr><th>Source</th><th>Kind</th><th>Status</th><th>Last run</th><th class="num">Events</th><th class="num">Relevant</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sources %}
+      <tr class="st-{{ s.status }}" data-id="{{ s.id }}">
+        <td>
+          <div class="sname">{{ s.name }} <span class="origin">{{ s.origin }}</span></div>
+          <a class="surl" href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url }}</a>
+          {% if s.last_error %}<div class="err">{{ s.last_error }}</div>{% endif %}
+          {% if s.notes %}<div class="muted small">{{ s.notes }}</div>{% endif %}
+        </td>
+        <td><code>{{ s.kind }}</code></td>
+        <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
+        <td class="small">{{ s.last_run_at | ts }}</td>
+        <td class="num">{{ s.last_event_count }}</td>
+        <td class="num">{{ s.relevant_events }}</td>
+        <td class="row-actions">
+          {% if s.status in ('active', 'trial') %}
+            <button class="btn small" data-status="disabled">Disable</button>
+          {% else %}
+            <button class="btn small" data-status="active">Enable</button>
+          {% endif %}
+          {% if s.origin != 'seed' %}<button class="btn small danger" data-delete>Remove</button>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

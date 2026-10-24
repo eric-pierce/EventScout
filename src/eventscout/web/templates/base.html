@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EventScout{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v() }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23c2410c'/><text x='16' y='23' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>E</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><span class="logo">E</span>EventScout</a>
+    <nav>
+      <a href="/" class="{{ 'on' if active == 'picks' }}">Picks</a>
+      <a href="/?view=all" class="{{ 'on' if active == 'all' }}">Browse</a>
+      <a href="/?view=starred" class="{{ 'on' if active == 'starred' }}">Going</a>
+      <a href="/sources" class="{{ 'on' if active == 'sources' }}">Sources</a>
+      <a href="/runs" class="{{ 'on' if active == 'runs' }}">Runs</a>
+    </nav>
+    <div class="runbox">
+      <span class="runstate" id="runstate">
+        {% if running %}Running…{% elif last_run %}Last run {{ last_run.started_at | ts }} · {{ last_run.status }}{% else %}Never run{% endif %}
+      </span>
+      <button class="btn primary" id="run-now" {% if running %}disabled{% endif %}>Run now</button>
+    </div>
+  </header>
+  <main>{% block content %}{% endblock %}</main>
+  <script src="/static/app.js?v={{ asset_v() }}"></script>
+</body>
+</html>
