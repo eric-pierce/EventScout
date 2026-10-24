@@ -57,6 +57,30 @@ Use a 14B+ model that handles JSON well. Smaller models extract noticeably worse
 `docker compose --profile browser up -d`, set `BROWSERLESS_URL=http://browserless:3000`, then add
 `options: { render: true }` to the source.
 
+## Prebuilt images (GitHub Actions)
+
+`.github/workflows/docker.yml` runs on every push and pull request:
+
+1. **test**: installs the package and runs `pytest`.
+2. **image**: builds the Docker image, smoke-tests it (the container must answer `/healthz`), then builds for
+   `linux/amd64` and `linux/arm64` and pushes to `ghcr.io/eric-pierce/eventscout`. Pull requests build but don't push.
+
+Tags: `latest` (default branch), the branch name, `sha-<short>` for every commit, and `1.2.3` / `1.2` for `v1.2.3`
+git tags. Dependabot (`.github/dependabot.yml`) keeps the actions and the Python base image current.
+
+On the server, pull instead of building:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+New GHCR packages are private. Either make the package public (GitHub → your profile → Packages → eventscout →
+Package settings → Change visibility), or log the server in once with a personal access token that has only the
+`read:packages` scope: `docker login ghcr.io -u eric-pierce`.
+
+To auto-update on the server, pin a tag in compose and run `docker compose pull && docker compose up -d` from cron,
+or use a tool like Watchtower.
+
 ## Configuration highlights (`config.yaml`)
 
 - `profile.interests`: weighted topics that drive ranking. Changing the profile re-scores upcoming events.

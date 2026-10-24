@@ -1,0 +1,11 @@
+# Weekly PRs that keep the workflow's actions and the Docker base image up to date.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,7 +1,9 @@
 services:
   eventscout:
+    # Published by .github/workflows/docker.yml on every push to main. `docker compose pull` fetches it;
+    # `docker compose up --build` builds from this checkout instead.
+    image: ghcr.io/eric-pierce/eventscout:latest
     build: .
-    image: eventscout:latest
     container_name: eventscout
     restart: unless-stopped
     ports:
