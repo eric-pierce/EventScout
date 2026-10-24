@@ -24,9 +24,12 @@ def cmd_serve(args) -> None:
 
     from eventscout.web.app import create_app
 
+    from eventscout.filesecrets import secrets_report
+
     svc = _service(args)
     cfg = svc.cfg
     log = logging.getLogger("eventscout")
+    log.info("secrets: %s", ", ".join(f"{k}={v}" for k, v in secrets_report().items()))  # sources only, never values
 
     def scheduled_run(discover: bool = False) -> None:
         if svc.is_running:
@@ -173,4 +176,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     for noisy in ("httpx", "httpcore", "anthropic", "apscheduler.executors"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    args.fn(args)
+    from eventscout.filesecrets import SecretFileError
+
+    try:
+        args.fn(args)
+    except SecretFileError as exc:
+        sys.exit(f"eventscout: secrets: {exc}")

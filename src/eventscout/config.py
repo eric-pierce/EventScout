@@ -202,6 +202,9 @@ def default_config_path() -> Path:
 
 
 def load_config(path: str | Path | None = None) -> Config:
+    from eventscout.filesecrets import load_file_secrets
+
+    load_file_secrets()  # NAME_FILE -> NAME, before ${NAME} interpolation and before any SDK reads the env
     path = Path(path) if path else default_config_path()
     raw: dict[str, Any] = {}
     if path.exists():

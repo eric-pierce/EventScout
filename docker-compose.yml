@@ -11,6 +11,19 @@ services:
     env_file: .env
     environment:
       TZ: America/New_York
+      # Sensitive values come from files in ./secrets (create them with scripts/init-secrets.sh), mounted
+      # read-only at /run/secrets. EventScout reads NAME from the file named by NAME_FILE.
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      WEB_PASSWORD_FILE: /run/secrets/web_password
+      EVENTSCOUT_FEED_TOKEN_FILE: /run/secrets/feed_token
+      TICKETMASTER_API_KEY_FILE: /run/secrets/ticketmaster_api_key
+    secrets:
+      - anthropic_api_key
+      - smtp_password
+      - web_password
+      - feed_token
+      - ticketmaster_api_key
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
@@ -53,6 +66,20 @@ services:
     environment:
       TOKEN: ${BROWSERLESS_TOKEN:-}
       CONCURRENT: 2
+
+# One file per secret; an empty file means "not used". Keep the folder chmod 700 and the files chmod 600,
+# owned by uid 1000 (the container user) on Linux hosts.
+secrets:
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key
+  smtp_password:
+    file: ./secrets/smtp_password
+  web_password:
+    file: ./secrets/web_password
+  feed_token:
+    file: ./secrets/feed_token
+  ticketmaster_api_key:
+    file: ./secrets/ticketmaster_api_key
 
 volumes:
   ollama:

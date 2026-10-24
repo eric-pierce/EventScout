@@ -30,18 +30,46 @@ Configured out of the box for Newton, MA / Greater Boston.
 
 ```bash
 cp config.example.yaml config.yaml     # edit profile.interests (the most important part)
-cp .env.example .env                   # add ANTHROPIC_API_KEY, PUBLIC_BASE_URL, EVENTSCOUT_FEED_TOKEN, SMTP…
-mkdir -p data && sudo chown 1000:1000 data   # container runs as uid 1000
-docker compose up -d --build
+cp .env.example .env                   # PUBLIC_BASE_URL, SMTP host/user, etc. (no secrets in here)
+scripts/init-secrets.sh                # creates ./secrets/ with one empty, chmod-600 file per secret
+printf '%s' 'sk-ant-...' > secrets/anthropic_api_key
+openssl rand -hex 16 | tr -d '\n' > secrets/feed_token   # optional: protects the calendar feed URLs
+mkdir -p data && sudo chown 1000:1000 data secrets/*      # container runs as uid 1000 (Linux hosts)
+docker compose up -d
 docker compose exec eventscout eventscout run   # first run now instead of waiting for 6am
 ```
 
 Open `http://<server>:8080`. Scheduled runs happen daily at 6am, and discovery runs Sundays at 5am. Both schedules are cron strings in `config.yaml`.
 
 **Calendar subscription:** copy the *Picks* feed URL from the dashboard sidebar into Google Calendar ("From URL"),
-Apple Calendar ("New Calendar Subscription"), or Outlook. If `EVENTSCOUT_FEED_TOKEN` is set, the URL includes
+Apple Calendar ("New Calendar Subscription"), or Outlook. If `secrets/feed_token` is set, the URL includes
 `?token=…`. Calendar apps have to reach the server, so either use them on your LAN/VPN (e.g. Tailscale) or put the
 app behind a reverse proxy with HTTPS. Google Calendar fetches from Google's servers, so it needs a publicly reachable URL.
+
+### Secrets
+
+Sensitive values live in `./secrets/`, one file each, and reach the container as Docker Compose secrets mounted
+read-only at `/run/secrets/`. They are never in `.env`, the container environment, or `docker inspect`.
+
+| File | Used for |
+|---|---|
+| `secrets/anthropic_api_key` | Claude API key (`llm.provider: claude`) |
+| `secrets/feed_token` | token required on calendar feed URLs |
+| `secrets/web_password` | dashboard basic-auth password (with `WEB_USERNAME` in `.env`) |
+| `secrets/smtp_password` | email digest |
+| `secrets/ticketmaster_api_key` | Ticketmaster source |
+
+An empty file means "not used". `secrets/` is git- and docker-ignored. If you previously put any of these in
+`.env`, `scripts/init-secrets.sh --from-env` moves them into the files and blanks them in `.env`. Setting both a
+variable and its file is refused at startup, so there is never doubt about which value is in use. At startup the
+log line `secrets: ANTHROPIC_API_KEY=file, ...` shows where each one came from (never the values).
+
+This works through a general rule: for any variable `NAME`, setting `NAME_FILE=/path` makes EventScout read `NAME`
+from that file. Outside Docker, either export the variable or point at the file:
+`ANTHROPIC_API_KEY_FILE=secrets/anthropic_api_key eventscout run`.
+
+The browserless and SearXNG tokens stay in `.env`: those services can't read secret files, and they're only
+reachable inside the compose network (browserless also on localhost).
 
 ### Local LLM instead of Claude
 
