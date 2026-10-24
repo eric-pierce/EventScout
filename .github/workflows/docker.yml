@@ -67,7 +67,7 @@ jobs:
 
       # Build for the runner's architecture first and make sure the container actually starts.
       - name: Build (smoke test)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -89,7 +89,7 @@ jobs:
       # Multi-arch build (amd64 for most servers, arm64 for Raspberry Pi / Apple Silicon); reuses the cache above.
       # Pull requests build but don't push.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
