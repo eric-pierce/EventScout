@@ -132,7 +132,7 @@ def create_app(svc: Service) -> FastAPI:
         else:
             where = {
                 "all": "status='ok'",
-                "starred": "starred=1",
+                "starred": "starred",
                 "hidden": "feedback < 0",
                 "filtered": "status='filtered'",
                 "unscored": "status='ok' AND score IS NULL",
@@ -178,7 +178,7 @@ def create_app(svc: Service) -> FastAPI:
 
     @app.get("/calendar/starred.ics", dependencies=[Depends(require_feed_auth)])
     def calendar_starred():
-        events = svc.db.upcoming_events(now(svc.tz), now(svc.tz) + timedelta(days=365), "starred = 1")
+        events = svc.db.upcoming_events(now(svc.tz), now(svc.tz) + timedelta(days=365), "starred")
         return Response(build_calendar(events, "EventScout — going", cfg.report.public_base_url),
                         media_type="text/calendar; charset=utf-8",
                         headers={"Content-Disposition": 'inline; filename="eventscout-going.ics"'})
@@ -261,6 +261,8 @@ def create_app(svc: Service) -> FastAPI:
 
     @app.get("/healthz")
     def healthz():
+        if not svc.db.ping():
+            return JSONResponse({"ok": False, "database": "unreachable"}, status_code=503)
         return {"ok": True}
 
     return app

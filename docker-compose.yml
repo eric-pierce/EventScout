@@ -9,8 +9,13 @@ services:
     ports:
       - "8080:8080"
     env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       TZ: America/New_York
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       # Sensitive values come from files in ./secrets (create them with scripts/init-secrets.sh), mounted
       # read-only at /run/secrets. EventScout reads NAME from the file named by NAME_FILE.
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
@@ -19,6 +24,7 @@ services:
       EVENTSCOUT_FEED_TOKEN_FILE: /run/secrets/feed_token
       TICKETMASTER_API_KEY_FILE: /run/secrets/ticketmaster_api_key
     secrets:
+      - postgres_password
       - anthropic_api_key
       - smtp_password
       - web_password
@@ -27,6 +33,26 @@ services:
     volumes:
       - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
+
+  # All EventScout data (events, sources, caches, run history). Not exposed outside the compose network.
+  # Backup: docker compose exec postgres pg_dump -U eventscout eventscout > eventscout.sql
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: eventscout
+      POSTGRES_USER: eventscout
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password   # read only when the volume is first initialised
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres:/var/lib/postgresql   # Postgres 18 images keep data under /var/lib/postgresql/18/docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eventscout -d eventscout"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    # ports: ["127.0.0.1:5432:5432"]   # uncomment to reach it from the host (psql, backups, local dev)
 
   # --- Optional services (enable with --profile) --------------------------------
 
@@ -67,9 +93,12 @@ services:
       TOKEN: ${BROWSERLESS_TOKEN:-}
       CONCURRENT: 2
 
-# One file per secret; an empty file means "not used". Keep the folder chmod 700 and the files chmod 600,
-# owned by uid 1000 (the container user) on Linux hosts.
+# One file per secret; an empty file means "not used". scripts/init-secrets.sh creates them: the folder is
+# chmod 700 (only you can open it on the host) and the files 644 (so both the eventscout and postgres containers,
+# which run as different users, can read their mounts).
 secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
   anthropic_api_key:
     file: ./secrets/anthropic_api_key
   smtp_password:
@@ -82,4 +111,5 @@ secrets:
     file: ./secrets/ticketmaster_api_key
 
 volumes:
+  postgres:
   ollama:

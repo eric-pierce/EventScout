@@ -1,5 +1,6 @@
 #!/bin/sh
 # Create ./secrets with one file per sensitive setting (an empty file means "not used").
+# The Postgres password is generated for you; the database is created with it on first start.
 #   scripts/init-secrets.sh             create any missing files (existing ones are left alone)
 #   scripts/init-secrets.sh --from-env  also move values that are currently in .env into the files
 #                                       and blank them in .env
@@ -10,7 +11,7 @@ umask 077
 mkdir -p secrets
 chmod 700 secrets
 
-for pair in anthropic_api_key:ANTHROPIC_API_KEY smtp_password:SMTP_PASSWORD web_password:WEB_PASSWORD \
+for pair in postgres_password:POSTGRES_PASSWORD anthropic_api_key:ANTHROPIC_API_KEY smtp_password:SMTP_PASSWORD web_password:WEB_PASSWORD \
             feed_token:EVENTSCOUT_FEED_TOKEN ticketmaster_api_key:TICKETMASTER_API_KEY; do
   file="secrets/${pair%%:*}"
   var="${pair#*:}"
@@ -28,11 +29,12 @@ for pair in anthropic_api_key:ANTHROPIC_API_KEY smtp_password:SMTP_PASSWORD web_
       fi
     fi
   fi
-  chmod 600 "$file"
+  # The folder (700) keeps other host users out; 644 lets the containers' own users read their mounted copy.
+  chmod 644 "$file"
 done
 
-if [ "$(uname -s)" = "Linux" ] && [ "$(id -u)" != "1000" ]; then
-  echo "note: the container runs as uid 1000 and must be able to read these files:"
-  echo "      sudo chown 1000 secrets/*"
+if [ ! -s secrets/postgres_password ]; then
+  LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32 > secrets/postgres_password
+  echo "generated secrets/postgres_password"
 fi
 echo "secrets/ ready. Put each value in its file, e.g.:  printf '%s' 'sk-ant-...' > secrets/anthropic_api_key"

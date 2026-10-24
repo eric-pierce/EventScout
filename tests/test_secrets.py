@@ -61,4 +61,6 @@ def test_init_script_moves_values_out_of_env(tmp_path):
     assert (work / "secrets" / "smtp_password").read_text() == ""
     assert "ANTHROPIC_API_KEY=\n" in (work / ".env").read_text() and "WEB_USERNAME=me" in (work / ".env").read_text()
     assert oct((work / "secrets").stat().st_mode & 0o777) == "0o700"
-    assert oct((work / "secrets" / "anthropic_api_key").stat().st_mode & 0o777) == "0o600"
+    assert oct((work / "secrets" / "anthropic_api_key").stat().st_mode & 0o777) == "0o644"
+    assert len((work / "secrets" / "postgres_password").read_text()) == 32  # generated
+    assert "generated secrets/postgres_password" in out

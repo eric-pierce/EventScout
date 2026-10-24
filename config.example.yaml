@@ -18,6 +18,17 @@ search:
   include_online: false
   max_price: 150            # null = no limit
 
+# --- Database ------------------------------------------------------------------------
+# PostgreSQL. Normally nothing to set here: docker compose provides the server, and every field defaults to the
+# matching environment variable (POSTGRES_HOST / POSTGRES_PORT / POSTGRES_DB / POSTGRES_USER, password from
+# secrets/postgres_password via POSTGRES_PASSWORD_FILE, or a full DATABASE_URL).
+# database:
+#   host: postgres
+#   port: 5432
+#   name: eventscout
+#   user: eventscout
+#   schema: public
+
 # --- What you like -----------------------------------------------------------
 # EDIT ME. These drive the LLM ranking. Weight 1-5 (5 = love it). Thumbs up/down in the
 # dashboard teach it further. Changing this section re-scores upcoming events on the next run.

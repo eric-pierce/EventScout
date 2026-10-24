@@ -23,6 +23,7 @@ SENSITIVE = (
     "WEB_PASSWORD",
     "EVENTSCOUT_FEED_TOKEN",
     "TICKETMASTER_API_KEY",
+    "POSTGRES_PASSWORD",
 )
 
 
@@ -44,8 +45,8 @@ def load_file_secrets(environ: dict[str, str] | None = None) -> list[str]:
             raise SecretFileError(f"{key} points to {path}, which does not exist") from None
         except PermissionError:
             raise SecretFileError(
-                f"{key}: cannot read {path} (permission denied). The container runs as uid 1000: on the host run "
-                f"`sudo chown 1000 secrets/*` and keep them `chmod 600`"
+                f"{key}: cannot read {path} (permission denied). Secret files must be readable inside the "
+                f"container: run scripts/init-secrets.sh, which sets the folder to 700 and the files to 644"
             ) from None
         if env.get(name) and env[name] != value:  # equal means an earlier call already loaded it
             raise SecretFileError(f"both {name} and {key} are set; remove {name} (keep secrets in the file only)")

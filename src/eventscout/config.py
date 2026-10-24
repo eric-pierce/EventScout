@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}")
 
@@ -28,6 +28,27 @@ def _interpolate(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: _interpolate(v) for k, v in value.items()}
     return value
+
+
+def _env(name: str, default: str | None = None) -> str | None:
+    return os.environ.get(name) or default
+
+
+class DatabaseConfig(BaseModel):
+    """PostgreSQL connection. Every field defaults to the matching POSTGRES_* environment variable (the password
+    usually arrives via POSTGRES_PASSWORD_FILE, see filesecrets), so config.yaml rarely needs this section."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    url: str | None = Field(default_factory=lambda: _env("DATABASE_URL"))  # full libpq URL; overrides the fields below
+    host: str = Field(default_factory=lambda: _env("POSTGRES_HOST", "postgres"))
+    port: int = Field(default_factory=lambda: int(_env("POSTGRES_PORT", "5432")))
+    name: str = Field(default_factory=lambda: _env("POSTGRES_DB", "eventscout"))
+    user: str = Field(default_factory=lambda: _env("POSTGRES_USER", "eventscout"))
+    password: str | None = Field(default_factory=lambda: _env("POSTGRES_PASSWORD"), repr=False)
+    schema_name: str = Field("public", alias="schema")
+    pool_size: int = 8
+    connect_timeout: float = 60  # seconds to wait for the server at startup (it may still be booting)
 
 
 class Home(BaseModel):
@@ -178,7 +199,8 @@ class SourceSeed(BaseModel):
 
 
 class Config(BaseModel):
-    data_dir: str = "/data"
+    data_dir: str = "/data"  # report outputs (report.html, events.ics, events.json); the data itself is in Postgres
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     home: Home = Field(default_factory=Home)
     search: SearchWindow = Field(default_factory=SearchWindow)
     profile: Profile = Field(default_factory=Profile)
@@ -191,10 +213,6 @@ class Config(BaseModel):
     email: EmailConfig = Field(default_factory=EmailConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     sources: list[SourceSeed] = Field(default_factory=list)
-
-    @property
-    def db_path(self) -> Path:
-        return Path(self.data_dir) / "eventscout.db"
 
 
 def default_config_path() -> Path:

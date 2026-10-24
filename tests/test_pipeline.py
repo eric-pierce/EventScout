@@ -17,8 +17,8 @@ def _src(db: Database, name: str):
     return db.get_source(sid)
 
 
-def test_dedupe_merges_across_sources(tmp_path):
-    db = Database(tmp_path / "t.db")
+def test_dedupe_merges_across_sources(db_config):
+    db = Database(db_config, "America/New_York")
     a, b = _src(db, "a"), _src(db, "b")
     day = at(3).replace(hour=0)
     id1 = db.upsert_event(RawEvent(title="The Lowdown Brass Band", start=day, time_known=False, venue_name="Club Passim"), a)
@@ -34,8 +34,8 @@ def test_dedupe_merges_across_sources(tmp_path):
     assert id3 != id4
 
 
-def test_hard_filter(cfg, tmp_path):
-    db = Database(tmp_path / "t.db")
+def test_hard_filter(cfg):
+    db = Database(cfg.database, cfg.home.timezone)
     s = _src(db, "a")
     ev = db.get_event(db.upsert_event(RawEvent(title="Toddler Dance Party", start=at(2)), s))
     assert hard_filter(ev, cfg) == "excluded keyword: toddler"
@@ -106,12 +106,12 @@ def test_web_app(cfg, fake_adapter):
         assert client.get(f"/?view={view}").status_code == 200
 
 
-def test_extraction_cache(cfg, tmp_path):
+def test_extraction_cache(cfg):
     from datetime import datetime
 
     from eventscout.tasks import extract_events
 
-    db = Database(tmp_path / "t.db")
+    db = Database(cfg.database, cfg.home.timezone)
     llm = FakeLLM(extract_events=[{
         "title": "Jazz Jam", "start": "2026-10-03T20:00", "end": None, "all_day": False, "venue_name": "Wally's",
         "address": None, "city": "Boston", "price_min": None, "price_max": None, "is_free": True, "cost_text": "free",

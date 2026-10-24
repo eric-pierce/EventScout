@@ -18,6 +18,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: eventscout
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: eventscout
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eventscout -d eventscout"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      EVENTSCOUT_TEST_DATABASE_URL: postgresql://eventscout:ci@localhost:5432/eventscout
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -78,8 +91,13 @@ jobs:
       - name: Smoke test
         run: |
           docker run --rm eventscout:ci --help
-          docker run -d --name es -p 8080:8080 -e EVENTSCOUT_DATA=/tmp/data eventscout:ci
-          for _ in $(seq 1 30); do
+          docker network create smoke
+          docker run -d --name pg --network smoke -e POSTGRES_USER=eventscout -e POSTGRES_PASSWORD=ci \
+            -e POSTGRES_DB=eventscout postgres:18-alpine
+          docker run -d --name es --network smoke -p 8080:8080 -e EVENTSCOUT_DATA=/tmp/data \
+            -e POSTGRES_HOST=pg -e POSTGRES_PASSWORD=ci eventscout:ci
+          # /healthz returns 200 only once the app is up and the database answers
+          for _ in $(seq 1 60); do
             curl -fsS http://localhost:8080/healthz && exit 0
             sleep 1
           done

@@ -1,4 +1,4 @@
-"""Geocoding (Nominatim) and drive-time (OSRM), both cached in SQLite."""
+"""Geocoding (Nominatim) and drive-time (OSRM), both cached in the database."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg
 
 from eventscout.db import Database
 from eventscout.http import FetchResult
@@ -55,13 +55,22 @@ def test_image_step_links_page_images_and_drops_logos(cfg, fake_adapter, monkeyp
     assert 'src="https://cdn.example/jazz.jpg"' in html and 'class="thumb empty"' in html
 
 
-def test_migration_adds_image_checked(tmp_path):
-    path = tmp_path / "old.db"
+def test_migration_adds_image_checked(db_config):
+    """A database created before image_checked existed gets the column on startup."""
     from eventscout.db import SCHEMA
 
-    with sqlite3.connect(path) as c:  # a database created before image_checked existed
-        c.executescript(SCHEMA.replace("    image_checked INTEGER NOT NULL DEFAULT 0,\n", ""))
-        assert "image_checked" not in {r[1] for r in c.execute("PRAGMA table_info(events)")}
-    Database(path)
-    with sqlite3.connect(path) as c:
-        assert "image_checked" in {r[1] for r in c.execute("PRAGMA table_info(events)")}
+    with psycopg.connect(db_config.url, autocommit=True) as c:
+        c.execute(f'CREATE SCHEMA "{db_config.schema_name}"')
+        c.execute(f'SET search_path TO "{db_config.schema_name}"')
+        c.execute(SCHEMA.replace("    image_checked BOOLEAN NOT NULL DEFAULT false,\n", ""))
+        assert "image_checked" not in _columns(c, db_config.schema_name)
+    Database(db_config, "UTC")
+    with psycopg.connect(db_config.url) as c:
+        assert "image_checked" in _columns(c, db_config.schema_name)
+
+
+def _columns(conn, schema: str) -> set[str]:
+    rows = conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = %s AND table_name = 'events'", (schema,)
+    ).fetchall()
+    return {r[0] for r in rows}

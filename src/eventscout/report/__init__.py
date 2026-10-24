@@ -85,7 +85,7 @@ def recommended(svc: "Service", *, days: int | None = None, min_score: int | Non
     start = start or now(svc.tz)
     end = end or start + timedelta(days=days or cfg.search.horizon_days)
     ms = cfg.profile.min_score if min_score is None else min_score
-    events = svc.db.upcoming_events(start, end, "status='ok' AND feedback >= 0 AND (score >= ? OR starred = 1)", (ms,))
+    events = svc.db.upcoming_events(start, end, "status='ok' AND feedback >= 0 AND (score >= %s OR starred)", (ms,))
     # drop events that already ended today
     events = [e for e in events if (e.end or e.start) >= start - timedelta(hours=1) or not e.time_known]
     events.sort(key=lambda e: -(e.score or 0))
@@ -134,7 +134,7 @@ def build_outputs(svc: "Service", rl: "RunLog", *, send_email: bool = True) -> d
     out_dir = Path(cfg.report.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     events = recommended(svc)
-    starred = [e for e in svc.db.upcoming_events(now(svc.tz), now(svc.tz) + timedelta(days=365), "starred = 1")]
+    starred = [e for e in svc.db.upcoming_events(now(svc.tz), now(svc.tz) + timedelta(days=365), "starred")]
     base = cfg.report.public_base_url
 
     ics_all = build_calendar(events, "EventScout picks", base)

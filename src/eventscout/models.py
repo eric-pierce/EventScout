@@ -86,11 +86,9 @@ class Event(RawEvent):
     def from_row(cls, row: Any) -> "Event":
         d = dict(row)
         for key in ("categories", "tags", "source_ids", "source_names"):
-            d[key] = json.loads(d.get(key) or "[]")
-        for key in ("all_day", "time_known", "online", "starred", "enriched", "location_approx"):
-            d[key] = bool(d.get(key))
-        if d.get("is_free") is not None:
-            d["is_free"] = bool(d["is_free"])
+            if isinstance(d.get(key), str):
+                d[key] = json.loads(d[key])
+            d[key] = d.get(key) or []
         return cls.model_validate(d)
 
 
@@ -115,5 +113,7 @@ class Source(BaseModel):
     @classmethod
     def from_row(cls, row: Any) -> "Source":
         d = dict(row)
-        d["options"] = json.loads(d.get("options") or "{}")
+        if isinstance(d.get("options"), str):
+            d["options"] = json.loads(d["options"])
+        d["options"] = d.get("options") or {}
         return cls.model_validate(d)

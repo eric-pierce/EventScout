@@ -55,7 +55,7 @@ class Service:
         from eventscout.report import env
 
         env.globals["home_tz"] = self.tz
-        self.db = Database(cfg.db_path)
+        self.db = Database(cfg.database, cfg.home.timezone)
         self.db.mark_stale_runs()
         self.run_lock = threading.Lock()
         self._llm: LLM | None = None
@@ -81,6 +81,9 @@ class Service:
             window_start=start, window_end=start + timedelta(days=days or self.cfg.search.horizon_days),
             db=self.db,
         )
+
+    def close(self) -> None:
+        self.db.close()
 
     @property
     def is_running(self) -> bool:
@@ -207,7 +210,7 @@ class Service:
 
     def _locate(self, ctx: Context, rl: RunLog) -> dict:
         geo = Geo(self.cfg, self.db)
-        todo = self._upcoming(ctx, "distance_miles IS NULL AND geo_attempted = 0 AND online = 0")
+        todo = self._upcoming(ctx, "distance_miles IS NULL AND NOT geo_attempted AND NOT online")
         located = 0
         for ev in todo:
             fields = geo.locate(ev)
@@ -296,7 +299,7 @@ class Service:
             return {"enriched": 0}
         cands = self._upcoming(
             ctx,
-            "status='ok' AND enriched=0 AND score >= ? AND url IS NOT NULL AND (time_known=0 OR (price_min IS NULL AND is_free IS NULL))",
+            "status='ok' AND NOT enriched AND score >= %s AND url IS NOT NULL AND (NOT time_known OR (price_min IS NULL AND is_free IS NULL))",
             (self.cfg.profile.min_score,),
         )
         cands.sort(key=lambda e: -(e.score or 0))
@@ -341,7 +344,7 @@ class Service:
             return {"found": 0}
         cands = self._upcoming(
             ctx,
-            "status='ok' AND image_url IS NULL AND image_checked = 0 AND url IS NOT NULL AND (score >= ? OR starred = 1)",
+            "status='ok' AND image_url IS NULL AND NOT image_checked AND url IS NOT NULL AND (score >= %s OR starred)",
             (self.cfg.profile.min_score,),
         )
         cands.sort(key=lambda e: -(e.score or 0))
@@ -377,7 +380,7 @@ class Service:
     def _update_source_lifecycle(self, ctx: Context, rl: RunLog) -> dict:
         min_score = self.cfg.profile.min_score
         relevant: dict[int, int] = {}
-        for ev in self._upcoming(ctx, "status='ok' AND score >= ?", (min_score,)):
+        for ev in self._upcoming(ctx, "status='ok' AND score >= %s", (min_score,)):
             for sid in ev.source_ids:
                 relevant[sid] = relevant.get(sid, 0) + 1
         changes = {"promoted": 0, "retired": 0, "disabled": 0}

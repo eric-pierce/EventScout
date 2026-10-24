@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
 
 from eventscout.config import Config, Interest, Profile, SourceSeed
@@ -50,8 +53,37 @@ class FakeAdapter(SourceAdapter):
         return list(self.events)
 
 
+# Tests run against a real PostgreSQL; each test gets its own schema, dropped afterwards.
+# Locally: docker run -d --name eventscout-pg-dev -e POSTGRES_USER=eventscout -e POSTGRES_PASSWORD=devpass \
+#   -e POSTGRES_DB=eventscout -p 127.0.0.1:55432:5432 postgres:18-alpine
+TEST_DATABASE_URL = os.environ.get(
+    "EVENTSCOUT_TEST_DATABASE_URL", "postgresql://eventscout:devpass@127.0.0.1:55432/eventscout"
+)
+
+
 @pytest.fixture
-def cfg(tmp_path) -> Config:
+def pg_schema():
+    name = f"test_{uuid.uuid4().hex[:10]}"
+    yield name
+    from eventscout.db import Database
+
+    Database.close_all()
+    try:
+        with psycopg.connect(TEST_DATABASE_URL, autocommit=True, connect_timeout=5) as conn:
+            conn.execute(f'DROP SCHEMA IF EXISTS "{name}" CASCADE')
+    except psycopg.OperationalError:
+        pass  # tests that never touched the database still pass without a server
+
+
+@pytest.fixture
+def db_config(pg_schema):
+    from eventscout.config import DatabaseConfig
+
+    return DatabaseConfig(url=TEST_DATABASE_URL, schema=pg_schema, connect_timeout=5, pool_size=4)
+
+
+@pytest.fixture
+def cfg(tmp_path, db_config) -> Config:
     c = Config(
         data_dir=str(tmp_path),
         profile=Profile(
@@ -62,6 +94,7 @@ def cfg(tmp_path) -> Config:
         # model_construct: "fake" is a test-only kind outside the config schema.
         sources=[SourceSeed.model_construct(name="Fake", url="https://fake.example/events", kind="fake", options={}, enabled=True)],
     )
+    c.database = db_config
     c.geocoding.nominatim_url = None
     c.geocoding.osrm_url = None
     c.report.output_dir = str(tmp_path / "output")
