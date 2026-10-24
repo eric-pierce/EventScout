@@ -134,7 +134,8 @@ web:
 # --- Seed sources ------------------------------------------------------------------
 # kind: auto | web | jsonld | ical | rss | localist | ticketmaster | bostonshows
 # web = schema.org JSON-LD when the page has it, otherwise LLM reads the page.
-# options: pages/page_param (pagination), extra_urls, render (headless browser), force_llm
+# options: pages/page_param (pagination), extra_urls, render (headless browser), force_llm,
+#          follow_links: {match: <url regex>, max: N} (index page: read the newest N linked pages instead)
 sources:
   - name: Boston Shows (live music)
     url: https://bostonshows.org/
@@ -152,6 +153,13 @@ sources:
   - name: The Boston Calendar
     url: https://www.thebostoncalendar.com/
     kind: auto            # behind a Cloudflare bot challenge; auto-disables if it stays blocked
+  - name: This Week Boston
+    url: https://thisweekboston.beehiiv.com/
+    kind: web
+    options:
+      follow_links:          # the homepage only lists weekly posts; read the newest ones (plain HTML, no render)
+        match: "/p/things-to-do"
+        max: 2
   - name: Eventbrite — Boston
     url: https://www.eventbrite.com/d/ma--boston/all-events/
     kind: web

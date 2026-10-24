@@ -177,6 +177,9 @@ def extract_events(llm: LLM, cfg: Config, text: str, page_url: str, today: datet
 _LINK = re.compile(r"([^\n<>]{2,200}?) <(https?://[^>\s]+)>")
 
 
+_TITLE_THEN_SEP = re.compile(r"\s*[@|:\u2013\u2014-]\s")
+
+
 def _norm_url(url: str | None) -> str:
     return (url or "").split("#", 1)[0].rstrip("/")
 
@@ -232,6 +235,9 @@ def attach_event_links(events: list[RawEvent], text: str, page_url: str) -> None
                 stem = label.rstrip(" .…")
                 if len(stem) >= 12:
                     score = max(score, fuzz.partial_ratio(stem, title, processor=utils.default_process))
+            # Newsletter style "Title @ Venue @ 6PM" / "Title - Venue": the whole title, then a separator.
+            if len(title) >= 8 and _TITLE_THEN_SEP.match(label.lower().removeprefix(title)) and label.lower().startswith(title):
+                score = max(score, 95)
             if when and when.search(after):  # same title listed several times: prefer the showing at this time
                 score += 5
             if score > best_score:

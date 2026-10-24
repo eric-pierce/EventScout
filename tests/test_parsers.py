@@ -139,6 +139,24 @@ def test_attach_event_links_fixes_listing_and_madeup_urls():
     assert evs[6].url == page                # "Boston" venue link must not match
 
 
+def test_attach_event_links_newsletter_style_labels():
+    from eventscout.models import RawEvent
+    from eventscout.tasks import attach_event_links
+
+    page = "https://twb.example/p/oct-16"
+    text = ("College Night @ ICA @ 6PM <https://ica.example/college-night>\n"
+            "Sin Bandera @ Wang Theatre @ 8PM <https://boch.example/sin-bandera>\n"
+            "Boston @ Somewhere <https://twb.example/tag/boston>\n")
+    day = datetime(2026, 10, 16, 18, tzinfo=TZ)
+    evs = [RawEvent(title="College Night", start=day, url=page),
+           RawEvent(title="Sin Bandera", start=day.replace(hour=20), url=None),
+           RawEvent(title="Boston", start=day.replace(hour=21), url=page)]  # too short to trust a prefix match
+    attach_event_links(evs, text, page)
+    assert evs[0].url == "https://ica.example/college-night"
+    assert evs[1].url == "https://boch.example/sin-bandera"
+    assert evs[2].url == page
+
+
 def test_attach_event_links_uses_showtime_when_one_of_several_listings_is_extracted():
     from eventscout.models import RawEvent
     from eventscout.tasks import attach_event_links
@@ -153,3 +171,55 @@ def test_attach_event_links_uses_showtime_when_one_of_several_listings_is_extrac
     [ev] = evs = [RawEvent(title="Operation Mincemeat: A New Musical", start=datetime(2026, 10, 24, 20, tzinfo=TZ), url=page)]
     attach_event_links(evs, text, page)
     assert ev.url.endswith("mincemeat-b")
+
+
+def test_follow_links_reads_newest_posts_not_the_index(ctx):
+    from eventscout.http import FetchResult
+    from eventscout.models import Source
+    from eventscout.sources.web import WebPageAdapter, follow_targets
+
+    index = """
+      <a href="/p/oct-1">/ Oct 1, 2026 Things to do, October 1st - 4th</a>
+      <a href="/p/sep-24">/ Sep 24, 2026 Things to do, September 24th - 27th</a>
+      <a href="/p/oct-16">Read more</a>
+      <a href="/p/oct-16">/ Oct 16, 2026 Things to do, October 16th - 18th</a>
+      <a href="/p/2024-apr">/ Apr 4, 2024 Things to do, April 4th - 7th</a>
+      <a href="https://elsewhere.example/p/oct-20">/ Oct 20, 2026 not this site</a>
+      <a href="/about">About</a>
+    """
+    base = "https://twb.example/"
+    assert follow_targets(index, base, {"match": "/p/", "max": 2}) == ["https://twb.example/p/oct-16", "https://twb.example/p/oct-1"]
+    assert follow_targets(index, base, "/p/sep")[:1] == ["https://twb.example/p/sep-24"]  # bare string = match
+
+    post = ('<p>FRIDAY - OCTOBER 16th</p><p><a href="https://ica.example/college-night">College Night @ ICA @ 6PM</a> '
+            "Head to the Seaport for a night of creative art-making and music.</p>") * 20
+    fetched = []
+
+    class FakeFetcher:
+        def get(self, url, render=False, **kw):
+            fetched.append(url)
+            body = index if url == base else f"<html><body>{post}</body></html>"
+            return FetchResult(url=url, status=200, content_type="text/html", text=body, content=body.encode())
+
+    extracted_from = []
+
+    class RecordingLLM:
+        name = "rec"
+
+        def json(self, *, system, user, schema, task):
+            extracted_from.append(user.split("Page URL: ", 1)[1].split("\n", 1)[0])
+            return {"events": [{"title": "College Night", "start": "2026-10-16T18:00", "end": None, "all_day": False,
+                                "venue_name": "ICA", "address": None, "city": "Boston", "price_min": None,
+                                "price_max": None, "is_free": None, "cost_text": None, "url": None, "description": "",
+                                "categories": [], "online": False}]}
+
+    from datetime import datetime
+
+    ctx.fetcher = FakeFetcher()
+    ctx.llm_factory = RecordingLLM
+    src = Source(id=1, name="TWB", url=base, kind="web", status="active", origin="seed", added_at=datetime.now(),
+                 options={"follow_links": {"match": "/p/things|/p/oct", "max": 2}})
+    events = WebPageAdapter().fetch(src, ctx)
+    assert fetched == [base, "https://twb.example/p/oct-16", "https://twb.example/p/oct-1"]
+    assert extracted_from == ["https://twb.example/p/oct-16", "https://twb.example/p/oct-1"]  # never the index
+    assert events[0].url == "https://ica.example/college-night"  # link taken from the post
