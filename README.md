@@ -135,6 +135,16 @@ Package settings → Change visibility), or log the server in once with a person
 To auto-update on the server, pin a tag in compose and run `docker compose pull && docker compose up -d` from cron,
 or use a tool like Watchtower.
 
+## Map view
+
+Picks, Browse and Going each have a **List / Map** switch. The map shows the same events with the same filters (date,
+search, score, distance, free, tag): one pin per venue, colored by its best score and sized by how many events
+it has. Clicking a pin lists that venue's events. Your home and the search radius are drawn too. Events without an
+exact location are counted in the header but not drawn: online events, venues the geocoder couldn't find, and those
+only located to their city's centre. The map uses Leaflet (from the jsDelivr CDN, pinned with an integrity hash) and
+OpenStreetMap's public tiles; set `web.map_tile_url` and `web.map_attribution` in `config.yaml` to use another tile
+provider.
+
 ## Settings in the dashboard
 
 **Settings → Profile** edits your interests (with weights), dislikes, excluded keywords, notes and minimum score.

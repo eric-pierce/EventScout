@@ -38,7 +38,12 @@ class FakeLLM(LLM):
             for it in items:
                 text = it["title"].lower()
                 score = 90 if "jazz" in text else 70 if "comedy" in text else 20
-                results.append({"id": it["id"], "score": score, "reason": "test", "tags": ["jazz"] if score == 90 else []})
+                results.append({
+                    "id": it["id"], "score": score, "reason": "test", "tags": ["jazz"] if score == 90 else [],
+                    "matched": ["Jazz"] if score == 90 else ["comedy"] if score == 70 else [],
+                    "against": [] if score > 20 else ["not one of your interests"],
+                    "factors": ["Saturday evening"],
+                })
             return {"results": results}
         if task == "extract":
             return {"events": self.extract_events}

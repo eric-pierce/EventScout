@@ -1,0 +1,11 @@
+{# Title, count and the List / Map switch, shared by the list and map pages. #}
+{% set qs = {'view': view, 'q': filters.q, 'days': filters.days, 'date': filters.date, 'min_score': filters.min_score,
+             'max_miles': filters.max_miles, 'free': 'true' if filters.free else '', 'tag': filters.tag} | urlencode %}
+<div class="list-head">
+  <h1>{{ {'picks': 'Picked for you', 'all': 'All upcoming events', 'starred': 'Going', 'hidden': 'Not interested', 'filtered': 'Excluded by rules', 'unscored': 'Not yet scored'}.get(view, 'Events') }}</h1>
+  <span class="muted">{{ count }} event{{ '' if count == 1 else 's' }}{% if day %} on {{ day.strftime('%A, %B %-d') }}{% endif %}{% if filters.tag %} tagged “{{ filters.tag }}”{% endif %}{% if unmapped %} · {{ unmapped }} without an exact location not on the map{% endif %}</span>
+  <nav class="tabs" aria-label="Show as">
+    <a class="tab{% if base_path == '/' %} on{% endif %}" href="/?{{ qs }}">List</a>
+    <a class="tab{% if base_path == '/map' %} on{% endif %}" href="/map?{{ qs }}">Map</a>
+  </nav>
+</div>

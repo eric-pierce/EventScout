@@ -188,6 +188,10 @@ class WebConfig(BaseModel):
     port: int = 8080
     username: str | None = None
     password: str | None = None
+    # Map view tiles. The default is OpenStreetMap's public server (fine for personal use); point this at another
+    # provider or your own tile server if you prefer.
+    map_tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    map_attribution: str = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 
 class SourceSeed(BaseModel):

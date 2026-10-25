@@ -29,6 +29,32 @@ log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 
 
+def map_places(events: list, today: dt.date) -> tuple[list[dict], int]:
+    """Events grouped into one pin per location (a venue's shows share a pin). Events without exact coordinates
+    (online, not geocoded, or only located to their city centre) are counted but not placed."""
+    from eventscout.report import _fmt_time
+
+    places: dict[tuple[float, float], dict] = {}
+    unmapped = 0
+    for e in events:
+        if e.latitude is None or e.longitude is None or e.location_approx or e.online:
+            unmapped += 1
+            continue
+        key = (round(e.latitude, 4), round(e.longitude, 4))  # ~10 m: same building
+        place = places.setdefault(key, {"lat": key[0], "lon": key[1], "name": e.location_display,
+                                        "miles": e.distance_miles, "best": None, "events": []})
+        if e.score is not None:
+            place["best"] = max(place["best"] or 0, e.score)
+        day = e.start.date()
+        place["events"].append({
+            "id": e.id, "title": e.title, "url": e.url, "score": e.score, "cost": e.cost_display,
+            "when": ("Today" if day == today else "Tomorrow" if day == today + timedelta(days=1)
+                     else e.start.strftime("%a %b %-d")) + " · " + _fmt_time(e),
+            "image": e.image_url, "starred": e.starred,
+        })
+    return list(places.values()), unmapped
+
+
 def _date_links(today: dt.date, last_day: dt.date) -> list[tuple[str, dt.date]]:
     """Quick picks under the date box: Today, Tomorrow, and the next weekend's Saturday and Sunday."""
     links = [("Today", today), ("Tomorrow", today + timedelta(days=1))]
@@ -113,9 +139,9 @@ def create_app(svc: Service) -> FastAPI:
         ))
 
     # ------------------------------------------------------------------ pages
-    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
-    def dashboard(view: str = "picks", q: str = "", days: str = "", date: str = "", min_score: str = "",
-                  max_miles: str = "", free: str = "", tag: str = ""):
+    def listing(view: str, q: str, days: str, date: str, min_score: str, max_miles: str, free: str,
+                tag: str) -> tuple[list, dict]:
+        """Events for a view + filters, and the template context shared by the list and the map."""
         # The filter form submits empty boxes as "", so numeric filters arrive as text: blank or junk means "not set".
         days = _opt_num(days, int)
         min_score = _opt_num(min_score, int)
@@ -156,17 +182,31 @@ def create_app(svc: Service) -> FastAPI:
             events = [e for e in events if e.is_free or e.price_min == 0]
         if tag:
             events = [e for e in events if tag in e.tags or tag in e.categories]
-        all_tags = sorted({t for e in events for t in e.tags})
-        return page(
-            "dashboard.html", groups=group_by_day(events, today), count=len(events), view=view,
-            day=day, beyond_horizon=bool(day and day > last_day), date_links=_date_links(today, last_day),
-            today=today, last_day=last_day,
-            filters={"q": q, "days": days or "", "date": day.isoformat() if day else "",
-                     "min_score": min_score if min_score is not None else "",
-                     "max_miles": max_miles if max_miles is not None else "", "free": free, "tag": tag},
-            all_tags=all_tags,
+        filters = {"q": q, "days": days or "", "date": day.isoformat() if day else "",
+                   "min_score": min_score if min_score is not None else "",
+                   "max_miles": max_miles if max_miles is not None else "", "free": free, "tag": tag}
+        return events, dict(
+            count=len(events), view=view, day=day, beyond_horizon=bool(day and day > last_day),
+            date_links=_date_links(today, last_day), today=today, last_day=last_day, filters=filters,
+            all_tags=sorted({t for e in events for t in e.tags}),
             ics_url=feed_url(svc, "/calendar.ics"), starred_ics_url=feed_url(svc, "/calendar/starred.ics"),
         )
+
+    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def dashboard(view: str = "picks", q: str = "", days: str = "", date: str = "", min_score: str = "",
+                  max_miles: str = "", free: str = "", tag: str = ""):
+        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag)
+        return page("dashboard.html", groups=group_by_day(events, ctx["today"]), base_path="/", **ctx)
+
+    @app.get("/map", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def map_page(view: str = "picks", q: str = "", days: str = "", date: str = "", min_score: str = "",
+                 max_miles: str = "", free: str = "", tag: str = ""):
+        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag)
+        places, unmapped = map_places(events, ctx["today"])
+        return page("map.html", base_path="/map", places=places, unmapped=unmapped,
+                    home={"lat": cfg.home.latitude, "lon": cfg.home.longitude, "label": cfg.home.label,
+                          "radius_miles": cfg.search.max_distance_miles},
+                    tiles={"url": cfg.web.map_tile_url, "attribution": cfg.web.map_attribution}, **ctx)
 
     @app.get("/sources", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
     def sources_page():

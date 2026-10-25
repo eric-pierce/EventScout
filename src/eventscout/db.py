@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS events (
     filter_reason TEXT,
     score INTEGER,
     score_reason TEXT,
+    score_detail JSONB,
     tags JSONB NOT NULL DEFAULT '[]',
     score_key TEXT,
     feedback SMALLINT NOT NULL DEFAULT 0,
@@ -100,6 +101,7 @@ CREATE TABLE IF NOT EXISTS score_cache (
     score INTEGER NOT NULL,
     reason TEXT,
     tags JSONB NOT NULL DEFAULT '[]',
+    detail JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -150,9 +152,11 @@ CREATE TABLE IF NOT EXISTS kv (
 # Columns added after a table's first release, applied to existing databases at startup.
 MIGRATIONS = [
     'ALTER TABLE events ADD COLUMN IF NOT EXISTS image_checked BOOLEAN NOT NULL DEFAULT false',
+    'ALTER TABLE events ADD COLUMN IF NOT EXISTS score_detail JSONB',
+    'ALTER TABLE score_cache ADD COLUMN IF NOT EXISTS detail JSONB',
 ]
 
-_JSON_COLUMNS = {"categories", "tags", "source_ids", "source_names", "options", "stats"}
+_JSON_COLUMNS = {"categories", "tags", "source_ids", "source_names", "options", "stats", "score_detail"}
 _BOOL_COLUMNS = {"all_day", "time_known", "location_approx", "online", "starred", "enriched", "geo_attempted",
                  "image_checked", "is_free"}
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -522,18 +526,18 @@ class Database:
             return c.execute("UPDATE events SET score_key = NULL").rowcount
 
     # --------------------------------------------------------- score cache
-    def get_cached_score(self, key: str) -> tuple[int, str, list[str]] | None:
+    def get_cached_score(self, key: str) -> tuple[int, str, list[str], dict | None] | None:
         with self.conn() as c:
-            row = c.execute("SELECT score, reason, tags FROM score_cache WHERE key = %s", (key,)).fetchone()
-        return (row["score"], row["reason"], list(row["tags"])) if row else None
+            row = c.execute("SELECT score, reason, tags, detail FROM score_cache WHERE key = %s", (key,)).fetchone()
+        return (row["score"], row["reason"], list(row["tags"]), row["detail"]) if row else None
 
-    def put_cached_score(self, key: str, score: int, reason: str, tags: list[str]) -> None:
+    def put_cached_score(self, key: str, score: int, reason: str, tags: list[str], detail: dict | None = None) -> None:
         with self.conn() as c:
             c.execute(
-                "INSERT INTO score_cache (key, score, reason, tags) VALUES (%s, %s, %s, %s) "
+                "INSERT INTO score_cache (key, score, reason, tags, detail) VALUES (%s, %s, %s, %s, %s) "
                 "ON CONFLICT (key) DO UPDATE SET score = EXCLUDED.score, reason = EXCLUDED.reason, "
-                "tags = EXCLUDED.tags, created_at = now()",
-                (key, score, reason, Jsonb(tags)),
+                "tags = EXCLUDED.tags, detail = EXCLUDED.detail, created_at = now()",
+                (key, score, reason, Jsonb(tags), Jsonb(detail) if detail is not None else None),
             )
 
     # ---------------------------------------------------------- geo caches

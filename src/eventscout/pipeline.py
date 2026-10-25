@@ -283,8 +283,9 @@ class Service:
                 continue
             hit = self.db.get_cached_score(key)
             if hit:
-                score, reason, tags = hit
-                self.db.update_event(ev.id, score=score, score_reason=reason, tags=tags, score_key=key)
+                score, reason, tags, detail = hit
+                self.db.update_event(ev.id, score=score, score_reason=reason, tags=tags, score_detail=detail,
+                                     score_key=key)
                 cached += 1
             else:
                 need.append((ev, key))
@@ -319,10 +320,11 @@ class Service:
             for rep, key in chunk:
                 if rep.id not in results:
                     continue
-                score, reason, tags = results[rep.id]
-                self.db.put_cached_score(key, score, reason, tags)
+                s = results[rep.id]
+                self.db.put_cached_score(key, s.score, s.reason, s.tags, s.detail)
                 for ev in unique[key]:
-                    self.db.update_event(ev.id, score=score, score_reason=reason, tags=tags, score_key=key)
+                    self.db.update_event(ev.id, score=s.score, score_reason=s.reason, tags=s.tags,
+                                         score_detail=s.detail, score_key=key)
                     scored += 1
         return {"scored": scored, "cached": cached, "deferred": deferred,
                 "llm_batches": (len(reps) + batch - 1) // batch, "errors": errors}

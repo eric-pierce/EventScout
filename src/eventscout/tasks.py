@@ -7,10 +7,11 @@ import json
 import logging
 import re
 from datetime import datetime
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
-from rapidfuzz import fuzz, utils
+from rapidfuzz import fuzz, process, utils
 
 from eventscout.config import Config, Profile
 from eventscout.dates import parse_when
@@ -265,8 +266,11 @@ SCORE_SCHEMA = {
                     "score": {"type": "integer", "description": "0-100"},
                     "reason": {"type": "string"},
                     "tags": {"type": "array", "items": {"type": "string"}},
+                    "matched": {"type": "array", "items": {"type": "string"}},
+                    "against": {"type": "array", "items": {"type": "string"}},
+                    "factors": {"type": "array", "items": {"type": "string"}},
                 },
-                "required": ["id", "score", "reason", "tags"],
+                "required": ["id", "score", "reason", "tags", "matched", "against", "factors"],
                 "additionalProperties": False,
             },
         }
@@ -299,7 +303,14 @@ Scoring guide:
 - 0-39: unrelated, matches a dislike, aimed at a different audience (e.g. children's programming, professional-only), or low-effort filler.
 Use the person's past feedback as the strongest signal of taste. Consider timing, distance and cost against their stated preferences.
 reason: at most 18 words, specific to the event (not "matches interests").
-tags: 1-3 short lowercase labels drawn from their interest list where applicable."""
+tags: 1-3 short lowercase labels drawn from their interest list where applicable.
+
+Also explain each score so the person can tune their preferences:
+matched: the interests from their list that this event fits, copied exactly as written above (empty if none).
+against: what lowered the score. Copy the exact "not interested in" item or preference text when one applies;
+  otherwise a short phrase such as "aimed at families", "22 mi away" or "pricey for a weeknight". Empty if nothing.
+factors: up to 3 short phrases on anything else that mattered: timing, distance, cost, or similar events they
+  liked or hid."""
 
 
 def score_key(ev: Event, profile_fp: str) -> str:
@@ -332,7 +343,28 @@ def _event_brief(ev: Event) -> dict:
     return d
 
 
-def score_events(llm: LLM, profile: Profile, events: list[Event], feedback: list[dict]) -> dict[int, tuple[int, str, list[str]]]:
+class Score(NamedTuple):
+    score: int
+    reason: str
+    tags: list[str]
+    detail: dict  # {"matched": [profile interest topics], "against": [...], "factors": [...]}
+
+
+def _explanation(r: dict, profile: Profile) -> dict:
+    """The model's breakdown, with `matched` mapped onto the profile's actual interest topics. Anything that isn't
+    one of the person's interests is dropped, so the UI can always show its weight and link it to Settings."""
+    topics = [i.topic for i in profile.interests]
+    matched: list[str] = []
+    for m in r.get("matched") or []:
+        hit = process.extractOne(str(m), topics, scorer=fuzz.token_sort_ratio, processor=utils.default_process,
+                                 score_cutoff=88) if topics else None
+        if hit and hit[0] not in matched:
+            matched.append(hit[0])
+    short = lambda xs: [str(x).strip()[:90] for x in (xs or []) if str(x).strip()][:3]  # noqa: E731
+    return {"matched": matched, "against": short(r.get("against")), "factors": short(r.get("factors"))}
+
+
+def score_events(llm: LLM, profile: Profile, events: list[Event], feedback: list[dict]) -> dict[int, Score]:
     liked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] > 0][:20]
     disliked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] < 0][:20]
     fb = ""
@@ -343,10 +375,11 @@ def score_events(llm: LLM, profile: Profile, events: list[Event], feedback: list
     user = (fb or "No feedback yet.\n") + "\nRate each event:\n" + json.dumps([_event_brief(e) for e in events], ensure_ascii=False)
     data = llm.json(system=score_system(profile), user=user, schema=SCORE_SCHEMA, task="score")
     wanted = {e.id for e in events}
-    out: dict[int, tuple[int, str, list[str]]] = {}
+    out: dict[int, Score] = {}
     for r in data.get("results", []):
         if r.get("id") in wanted:
-            out[r["id"]] = (max(0, min(100, int(r["score"]))), r.get("reason", "")[:200], [t.lower() for t in r.get("tags", [])][:4])
+            out[r["id"]] = Score(max(0, min(100, int(r["score"]))), r.get("reason", "")[:200],
+                                 [t.lower() for t in r.get("tags", [])][:4], _explanation(r, profile))
     missing = wanted - out.keys()
     if missing:
         log.warning("scorer skipped %d events", len(missing))

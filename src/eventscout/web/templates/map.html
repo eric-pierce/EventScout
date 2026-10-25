@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% set active = view if view in ('picks', 'all', 'starred') else '' %}
+{% block title %}Map · EventScout{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+{% endblock %}
+{% block content %}
+<div class="layout">
+  {% include "_sidebar.html" %}
+
+  <section class="feed-list">
+    {% include "_listhead.html" %}
+    {% if beyond_horizon %}
+      <div class="empty">
+        <p>{{ day.strftime('%A, %B %-d') }} is past the search window.</p>
+        <p class="muted">EventScout collects events {{ cfg.search.horizon_days }} days ahead (through {{ last_day.strftime('%B %-d') }}).</p>
+      </div>
+    {% else %}
+      <div id="map" class="map" aria-label="Map of events"></div>
+      <p class="map-legend muted small">
+        <span class="dot-key hi"></span>score 80+ <span class="dot-key mid"></span>{{ cfg.profile.min_score }}–79
+        <span class="dot-key lo"></span>lower / unscored · bigger circles have more events ·
+        ringed dot: home · dashed circle: {{ cfg.search.max_distance_miles | int }} mi
+      </p>
+    {% endif %}
+  </section>
+</div>
+<script id="map-data" type="application/json">{{ {"places": places, "home": home, "tiles": tiles, "min_score": cfg.profile.min_score} | tojson }}</script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script src="/static/map.js?v={{ asset_v() }}"></script>
+{% endblock %}

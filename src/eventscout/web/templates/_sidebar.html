@@ -1,0 +1,42 @@
+{# Filter sidebar shared by the list (/) and map (/map) pages; `base_path` is the page's own path. #}
+  <aside class="side">
+    <form class="filters" method="get" action="{{ base_path }}">
+      <input type="hidden" name="view" value="{{ view }}">
+      <label>Search<input type="search" name="q" value="{{ filters.q }}" placeholder="jazz, trivia, Somerville…"></label>
+      <div class="row2">
+        <label>Date<input type="date" name="date" value="{{ filters.date }}" min="{{ today.isoformat() }}" max="{{ last_day.isoformat() }}"></label>
+        <label{% if filters.date %} class="overridden" title="A specific date is selected"{% endif %}>Days ahead<input type="number" name="days" min="1" max="90" value="{{ filters.days }}" placeholder="{{ cfg.search.horizon_days }}"></label>
+      </div>
+      <div class="datelinks">
+        {% for label, d in date_links %}<a class="tag{% if d == day %} on{% endif %}" href="?{{ {'view': view, 'date': d.isoformat(), 'q': filters.q, 'min_score': filters.min_score, 'max_miles': filters.max_miles, 'free': 'true' if filters.free else '', 'tag': filters.tag} | urlencode }}">{{ label }}</a>{% endfor %}
+        {% if day %}<a class="tag clear" href="?{{ {'view': view, 'days': filters.days, 'q': filters.q, 'min_score': filters.min_score, 'max_miles': filters.max_miles, 'free': 'true' if filters.free else '', 'tag': filters.tag} | urlencode }}">Any date ×</a>{% endif %}
+      </div>
+      <label>Min score<input type="number" name="min_score" min="0" max="100" value="{{ filters.min_score }}" placeholder="{{ cfg.profile.min_score if view == 'picks' else 0 }}"></label>
+      <label>Max miles<input type="number" step="0.5" name="max_miles" min="0" value="{{ filters.max_miles }}" placeholder="{{ cfg.search.max_distance_miles | int }}"></label>
+      <label class="check"><input type="checkbox" name="free" value="true" {% if filters.free %}checked{% endif %}> Free only</label>
+      {% if filters.tag %}<input type="hidden" name="tag" value="{{ filters.tag }}">{% endif %}
+      <div class="row2"><button class="btn primary" type="submit">Apply</button><a class="btn" href="{{ base_path }}?view={{ view }}">Reset</a></div>
+    </form>
+
+    <section class="panel">
+      <h4>More views</h4>
+      <a href="/?view=hidden">Not interested</a>
+      <a href="/?view=filtered">Excluded by rules</a>
+      <a href="/?view=unscored">Not yet scored</a>
+      <a href="/report.html" target="_blank">Latest static report</a>
+    </section>
+
+    <section class="panel">
+      <h4>Calendar feeds</h4>
+      <p class="muted">Subscribe in Google/Apple/Outlook calendar — it refreshes automatically.</p>
+      <div class="feed"><span>Picks</span><input readonly value="{{ ics_url }}" onclick="this.select()"><a class="btn small" href="{{ ics_url }}" download>Download</a></div>
+      <div class="feed"><span>Going</span><input readonly value="{{ starred_ics_url }}" onclick="this.select()"><a class="btn small" href="{{ starred_ics_url }}" download>Download</a></div>
+    </section>
+
+    {% if all_tags %}
+    <section class="panel">
+      <h4>Tags</h4>
+      <div class="tagcloud">{% for t in all_tags %}<a class="tag{% if t == filters.tag %} on{% endif %}" href="{{ base_path }}?{{ {'view': view, 'tag': t, 'date': filters.date, 'days': filters.days} | urlencode }}">{{ t }}</a>{% endfor %}</div>
+    </section>
+    {% endif %}
+  </aside>

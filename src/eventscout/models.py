@@ -55,6 +55,7 @@ class Event(RawEvent):
     filter_reason: str | None = None
     score: int | None = None
     score_reason: str | None = None
+    score_detail: dict | None = None  # {"matched": [...], "against": [...], "factors": [...]} (see tasks.Score)
     tags: list[str] = Field(default_factory=list)
     score_key: str | None = None
     feedback: int = 0  # -1 not interested, 0 none, 1 liked

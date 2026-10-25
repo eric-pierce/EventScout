@@ -240,3 +240,90 @@ def test_one_bad_detail_page_does_not_sink_the_run(cfg, fake_adapter, monkeypatc
     svc._llm = FakeLLM()
     stats = svc.run()  # must not raise
     assert stats["report"]["recommended"] == 1
+
+
+def test_score_explanation_maps_to_profile_interests():
+    from eventscout.config import Interest, Profile
+    from eventscout.tasks import _explanation
+
+    profile = Profile(interests=[Interest(topic="live music in small venues (indie, folk, jazz)", weight=5),
+                                 Interest(topic="comedy and improv shows", weight=4)])
+    d = _explanation({
+        "matched": ["Live music in small venues (indie, folk, jazz)", "comedy & improv shows", "underwater basket weaving"],
+        "against": ["networking mixers and sales pitches", "", "x" * 300, "four", "five"],
+        "factors": ["7pm Tuesday fits your weeknight rule"],
+    }, profile)
+    assert d["matched"] == ["live music in small venues (indie, folk, jazz)", "comedy and improv shows"]  # exact topics
+    assert d["against"][0] == "networking mixers and sales pitches" and len(d["against"]) == 3
+    assert len(d["against"][1]) == 90
+    assert d["factors"] == ["7pm Tuesday fits your weeknight rule"]
+
+
+def test_why_panel_shows_breakdown_and_survives_cache(cfg, fake_adapter):
+    from eventscout.config import Interest
+
+    cfg.profile.interests = [Interest(topic="jazz", weight=5), Interest(topic="comedy", weight=3)]
+    fake_adapter.events = [
+        RawEvent(title="Jazz at Wally's", start=at(1, 21), venue_name="Wally's"),
+        RawEvent(title="Jazz at Wally's", start=at(8, 21), venue_name="Wally's"),  # same listing next week -> cache
+    ]
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    evs = svc.db.upcoming_events(at(-1), at(10))
+    assert [e.score_detail["matched"] for e in evs] == [["jazz"], ["jazz"]]
+    assert svc.db.get_cached_score(evs[0].score_key)[3]["factors"] == ["Saturday evening"]
+
+    html = TestClient(create_app(svc)).get("/").text
+    assert "Why 90?" in html and "Matches your interests" in html
+    assert '<span class="chip good" title="Interest weight 5 of 5">jazz<b>5/5</b></span>' in html
+    assert "Also considered" in html and "Saturday evening" in html and "/settings#profile" in html
+
+
+def test_why_panel_for_scores_without_breakdown(cfg, fake_adapter):
+    fake_adapter.events = [RawEvent(title="Jazz Night", start=at(1, 21))]
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    ev = svc.db.upcoming_events(at(-1), at(5))[0]
+    svc.db.update_event(ev.id, score_detail=None)  # a score recorded before breakdowns existed
+    html = TestClient(create_app(svc)).get("/").text
+    assert "Why 90?" in html and "eventscout rescore" in html
+
+
+def test_map_view_groups_events_by_venue(cfg, fake_adapter):
+    import json
+    import re
+
+    wallys = dict(venue_name="Wally's Cafe", latitude=42.3409, longitude=-71.0816)
+    fake_adapter.events = [
+        RawEvent(title="Jazz Jam", start=at(1, 20), **wallys),
+        RawEvent(title="Late Jazz Set", start=at(1, 23), **wallys),                       # same pin as above
+        RawEvent(title="Jazz </script><script>alert(1)</script>", start=at(2, 20),       # hostile title
+                 venue_name="Lizard Lounge", latitude=42.3889, longitude=-71.1194),
+        RawEvent(title="Jazz Online", start=at(2, 21), online=True),                       # online: never mapped
+        RawEvent(title="Jazz Somewhere", start=at(3, 21), city="Boston"),                  # no coordinates
+    ]
+    cfg.search.include_online = True
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    client = TestClient(create_app(svc))
+
+    r = client.get("/map?view=all")
+    assert r.status_code == 200
+    assert "<script>alert(1)" not in r.text                     # tojson escapes it inside the data block
+    data = json.loads(re.search(r'<script id="map-data" type="application/json">(.*?)</script>', r.text, re.S).group(1))
+    places = {p["name"]: p for p in data["places"]}
+    assert len(places["Wally's Cafe"]["events"]) == 2 and places["Wally's Cafe"]["best"] == 90
+    assert places["Lizard Lounge"]["events"][0]["title"].startswith("Jazz </script>")   # intact after decoding
+    assert "2 without an exact location not on the map" in r.text
+    assert data["home"]["radius_miles"] == cfg.search.max_distance_miles
+    assert 'integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="' in r.text
+
+    # Same filters as the list: a date narrows the pins; the List/Map switch keeps the filters.
+    day1 = at(1).date().isoformat()
+    d1 = client.get(f"/map?view=all&date={day1}").text
+    assert "Lizard Lounge" not in d1 and "Wally" in d1
+    assert f'href="/?view=all&amp;q=&amp;days=&amp;date={day1}' in d1
+    assert f'href="/map?view=all&amp;q=&amp;days=&amp;date={day1}' in client.get(f"/?view=all&date={day1}").text

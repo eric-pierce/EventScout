@@ -1,3 +1,42 @@
+{% macro why(e, base_url="") -%}
+{#- How the score came about, so preferences can be tuned. Needs `cfg` (import this file "with context"). -#}
+{%- set d = e.score_detail or {} -%}
+{%- set weights = {} -%}
+{%- for i in cfg.profile.interests %}{% set _ = weights.update({i.topic: i.weight}) %}{% endfor -%}
+<details class="why">
+  <summary>Why {{ e.score }}?</summary>
+  <div class="why-body">
+    {% if d %}
+      <div class="why-row">
+        <span class="why-label">Matches your interests</span>
+        <span class="why-items">
+        {% for t in d.matched %}<span class="chip good" title="Interest weight {{ weights.get(t, '?') }} of 5">{{ t }}{% if weights.get(t) %}<b>{{ weights[t] }}/5</b>{% else %}<i>no longer in your profile</i>{% endif %}</span>
+        {% else %}<span class="muted">None of your listed interests</span>{% endfor %}
+        </span>
+      </div>
+      {% if d.against %}
+      <div class="why-row">
+        <span class="why-label">Held back by</span>
+        <span class="why-items">{% for t in d.against %}<span class="chip bad">{{ t }}</span>{% endfor %}</span>
+      </div>
+      {% endif %}
+      {% if d.factors %}
+      <div class="why-row">
+        <span class="why-label">Also considered</span>
+        <span class="why-items">{% for t in d.factors %}<span class="chip">{{ t }}</span>{% endfor %}</span>
+      </div>
+      {% endif %}
+    {% else %}
+      <p class="muted">Only the one-line reason above was recorded for this score. Events scored from now on get a full
+        breakdown; to refresh existing scores run <code>eventscout rescore</code> (re-scores everything on the next run).</p>
+    {% endif %}
+    <p class="why-foot">Score {{ e.score }}/100; picks need {{ cfg.profile.min_score }}+.
+      <a href="{{ base_url }}/settings#profile">Adjust interests, weights or dislikes</a>, or use ▲ / ▼ on events so similar
+      ones rank higher or lower.</p>
+  </div>
+</details>
+{%- endmacro %}
+
 {% macro event_card(e, interactive=True, base_url="") -%}
 <article class="event{% if e.starred %} is-starred{% endif %}{% if e.feedback < 0 %} is-hidden{% endif %}" id="event-{{ e.id }}" data-id="{{ e.id }}">
   <div class="event-time">
@@ -22,6 +61,7 @@
       <span class="dot">·</span><span class="cost{% if e.is_free %} free{% endif %}">{{ e.cost_display }}</span>
     </div>
     {% if e.score_reason %}<p class="reason">{{ e.score_reason }}</p>{% endif %}
+    {% if e.score is not none %}{{ why(e, base_url) }}{% endif %}
     {% if e.filter_reason %}<p class="reason filtered">Excluded: {{ e.filter_reason }}</p>{% endif %}
     <div class="foot">
       {% for t in e.tags %}<a class="tag" href="{{ base_url }}/?tag={{ t | urlencode }}">{{ t }}</a>{% endfor %}
