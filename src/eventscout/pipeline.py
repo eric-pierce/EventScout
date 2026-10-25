@@ -7,11 +7,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from rapidfuzz import fuzz
 
-from eventscout.config import Config
+from eventscout.config import Config, default_config_path, load_config
 from eventscout.db import Database
 from eventscout.dates import now
 from eventscout.filtering import hard_filter
@@ -49,8 +50,12 @@ class RunLog:
 class Service:
     """Long-lived application state shared by the scheduler, CLI and web app."""
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, config_path: str | Path | None = None):
+        from eventscout.configfile import ConfigFile
+
         self.cfg = cfg
+        self.config_file = ConfigFile(config_path or default_config_path(), Path(cfg.data_dir) / "config-backups")
+        self.on_reload: list = []  # callbacks run after the config is reloaded (e.g. rescheduling cron jobs)
         self.tz = ZoneInfo(cfg.home.timezone)
         from eventscout.report import env
 
@@ -66,6 +71,37 @@ class Service:
         if self._llm is None:
             self._llm = make_llm(self.cfg)
         return self._llm
+
+    # Settings that the running process can't swap out; changing them takes effect on restart.
+    _RESTART_ONLY = ("database", "web", "data_dir")
+
+    def reload_config(self) -> list[str]:
+        """Re-read config.yaml and apply it to the running service. Returns settings that need a restart."""
+        new = load_config(self.config_file.path)
+        restart = [k for k in self._RESTART_ONLY if getattr(new, k) != getattr(self.cfg, k)]
+        if new.home.timezone != self.cfg.home.timezone:
+            restart.append("home.timezone")
+        for name in Config.model_fields:
+            if name not in self._RESTART_ONLY:
+                setattr(self.cfg, name, getattr(new, name))  # same Config object, so every holder sees the change
+        self._llm = None  # provider/model settings may have changed
+        self.sync_seed_sources()
+        for callback in self.on_reload:
+            callback()
+        return restart
+
+    def add_source_to_config(self, source_id: int, name: str, url: str, kind: str, options: dict | None = None) -> str | None:
+        """Write a newly added source into config.yaml so the file stays the record of your sources.
+        Returns a warning if the file couldn't be updated (the source still works from the database)."""
+        from eventscout.configfile import ConfigFileError
+
+        try:
+            self.config_file.add_source(name, url, kind, {k: v for k, v in (options or {}).items() if not k.startswith("_")})
+        except ConfigFileError as exc:
+            return f"added, but not saved to config.yaml: {exc}"
+        self.db.update_source(source_id, origin="seed")  # now managed by the config file like the other seeds
+        self.reload_config()
+        return None
 
     def sync_seed_sources(self) -> None:
         # 'auto' seeds are resolved to a concrete kind on their first run (see _resolve_auto).

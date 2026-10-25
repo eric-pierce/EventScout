@@ -12,9 +12,11 @@ from eventscout.config import load_config
 
 
 def _service(args):
+    from eventscout.config import default_config_path
     from eventscout.pipeline import Service
 
-    return Service(load_config(args.config))
+    path = args.config or default_config_path()
+    return Service(load_config(path), config_path=path)
 
 
 def cmd_serve(args) -> None:
@@ -41,16 +43,25 @@ def cmd_serve(args) -> None:
             log.exception("scheduled run failed")
 
     sched = BackgroundScheduler(timezone=cfg.home.timezone)
-    sched.add_job(scheduled_run, CronTrigger.from_crontab(cfg.schedule.run, timezone=cfg.home.timezone),
-                  id="run", max_instances=1, coalesce=True, misfire_grace_time=3600)
-    if cfg.discovery.enabled:
-        sched.add_job(scheduled_run, CronTrigger.from_crontab(cfg.discovery.schedule, timezone=cfg.home.timezone),
-                      kwargs={"discover": True}, id="discover", max_instances=1, coalesce=True, misfire_grace_time=3600)
+
+    def schedule_jobs() -> None:
+        """(Re)register the cron jobs from the current config; runs at startup and after every config reload."""
+        opts = dict(max_instances=1, coalesce=True, misfire_grace_time=3600, replace_existing=True)
+        sched.add_job(scheduled_run, CronTrigger.from_crontab(cfg.schedule.run, timezone=cfg.home.timezone),
+                      id="run", **opts)
+        if cfg.discovery.enabled:
+            sched.add_job(scheduled_run, CronTrigger.from_crontab(cfg.discovery.schedule, timezone=cfg.home.timezone),
+                          kwargs={"discover": True}, id="discover", **opts)
+        elif sched.get_job("discover"):
+            sched.remove_job("discover")
+        for job in sched.get_jobs():
+            log.info("scheduled %s: next run %s", job.id, job.next_run_time)
+
     if cfg.schedule.run_on_startup:
         sched.add_job(scheduled_run, id="startup", next_run_time=datetime.now().astimezone())
     sched.start()
-    for job in sched.get_jobs():
-        log.info("scheduled %s: next run %s", job.id, job.next_run_time)
+    schedule_jobs()
+    svc.on_reload.append(schedule_jobs)
 
     uvicorn.run(create_app(svc), host=cfg.web.host, port=cfg.web.port, log_level="info", access_log=False)
     sched.shutdown(wait=False)
@@ -102,8 +113,13 @@ def cmd_sources(args) -> None:
         if args.action == "add":
             det = detect_kind(args.target, fetcher, ctx)
             events = trial_fetch(det, args.name or args.target, ctx)
-            sid = svc.db.add_source(args.name or args.target, det.url, det.kind, "active", "manual", notes=det.note)
-            print(f"added #{sid}: {det.kind} ({det.note}) — {len(events)} upcoming events")
+            name = args.name or args.target
+            sid = svc.db.add_source(name, det.url, det.kind, "active", "manual", notes=det.note)
+            if sid is None:
+                sys.exit(f"eventscout: {det.url} is already a source")
+            warning = svc.add_source_to_config(sid, name, det.url, det.kind)
+            print(f"added #{sid}: {det.kind} ({det.note}) — {len(events)} upcoming events"
+                  + (f"\nwarning: {warning}" if warning else f"\nsaved to {svc.config_file.path}"))
         elif args.action == "check":
             targets = svc.db.list_sources() if args.target == "all" else [svc.db.get_source(int(args.target))]
             for src in targets:

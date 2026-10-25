@@ -31,7 +31,7 @@ services:
       - feed_token
       - ticketmaster_api_key
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
+      - ./config.yaml:/config/config.yaml   # writable: Settings and Sources in the dashboard save here (chown 1000 on Linux)
       - ./data:/data
 
   # All EventScout data (events, sources, caches, run history). Not exposed outside the compose network.

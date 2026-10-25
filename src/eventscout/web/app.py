@@ -13,8 +13,10 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from eventscout.config import Profile
+from eventscout.configfile import ConfigFileError, text_hash
 from eventscout.dates import now
 from eventscout.detect import detect_kind, trial_fetch
 from eventscout.http import Fetcher, FetchError
@@ -62,6 +64,11 @@ class NewSource(BaseModel):
 
 class SourceStatus(BaseModel):
     status: str
+
+
+class RawConfig(BaseModel):
+    text: str
+    base_hash: str
 
 
 def create_app(svc: Service) -> FastAPI:
@@ -242,22 +249,73 @@ def create_app(svc: Service) -> FastAPI:
         sid = svc.db.add_source(name, det.url, det.kind, status="active", origin="manual", notes=det.note)
         if not sid:
             raise HTTPException(409, "that source already exists")
-        return {"id": sid, "kind": det.kind, "events_found": len(events), "note": det.note}
+        warning = svc.add_source_to_config(sid, name, det.url, det.kind)
+        return {"id": sid, "kind": det.kind, "events_found": len(events), "note": det.note,
+                "saved_to_config": warning is None, "warning": warning}
 
     @app.post("/api/sources/{source_id}/status", dependencies=[Depends(require_auth)])
     def source_status(source_id: int, body: SourceStatus):
         if body.status not in ("active", "trial", "disabled", "retired"):
             raise HTTPException(400)
+        src = svc.db.get_source(source_id)
+        if src is None:
+            raise HTTPException(404)
+        warning = None
+        if src.origin == "seed" and body.status in ("active", "disabled"):
+            # Seeds are defined in config.yaml; record the switch there too, or a restart would undo it.
+            try:
+                svc.config_file.set_source_enabled(src.url, body.status == "active")
+            except ConfigFileError as exc:
+                warning = f"changed for now, but not saved to config.yaml (a restart will undo it): {exc}"
         fields = {"status": body.status}
         if body.status == "active":
             fields["consecutive_failures"] = 0
         svc.db.update_source(source_id, **fields)
-        return {"ok": True}
+        return {"ok": True, "warning": warning}
 
     @app.delete("/api/sources/{source_id}", dependencies=[Depends(require_auth)])
     def delete_source(source_id: int):
+        src = svc.db.get_source(source_id)
+        if src is None:
+            raise HTTPException(404)
+        if src.origin == "seed" and svc.config_file.has_source(src.url):
+            try:
+                svc.config_file.remove_source(src.url)
+            except ConfigFileError as exc:
+                raise HTTPException(409, f"can't remove it from config.yaml, so it would come back on restart: {exc}")
         svc.db.delete_source(source_id)
+        svc.reload_config()
         return {"ok": True}
+
+    # --------------------------------------------------------------- settings
+    @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def settings_page():
+        text = svc.config_file.read_text()
+        return page("settings.html", profile=cfg.profile, config_text=text, config_hash=text_hash(text),
+                    config_path=str(svc.config_file.path), read_only=svc.config_file.read_only_reason())
+
+    @app.post("/api/profile", dependencies=[Depends(require_auth)])
+    def save_profile(body: dict):
+        try:
+            profile = Profile.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(422, "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()[:5]))
+        before = cfg.profile.fingerprint()
+        try:
+            svc.config_file.update_profile(profile)
+        except ConfigFileError as exc:
+            raise HTTPException(409, str(exc))
+        svc.reload_config()
+        return {"ok": True, "rescore": cfg.profile.fingerprint() != before}
+
+    @app.post("/api/config", dependencies=[Depends(require_auth)])
+    def save_config(body: RawConfig):
+        try:
+            svc.config_file.write_text(body.text, base_hash=body.base_hash)
+        except ConfigFileError as exc:
+            raise HTTPException(409 if "changed on disk" in str(exc) else 422, str(exc))
+        restart = svc.reload_config()
+        return {"ok": True, "restart_needed": restart, "hash": text_hash(svc.config_file.read_text())}
 
     @app.get("/healthz")
     def healthz():

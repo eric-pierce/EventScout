@@ -77,7 +77,8 @@
     status.textContent = "Checking source… (may take a minute if the page needs the LLM)";
     try {
       const r = await post("/api/sources", { url: data.url, name: data.name || null });
-      status.textContent = `Added as ${r.kind} — ${r.events_found} upcoming events found.`;
+      status.textContent = `Added as ${r.kind} — ${r.events_found} upcoming events found.`
+        + (r.saved_to_config ? " Saved to config.yaml." : ` ${r.warning}`);
       setTimeout(() => location.reload(), 1200);
     } catch (err) {
       status.textContent = `Not added: ${err.message}`;
@@ -88,15 +89,79 @@
       const id = b.closest("tr").dataset.id;
       try {
         if (b.hasAttribute("data-delete")) {
-          if (!confirm("Remove this source?")) return;
+          if (!confirm("Remove this source? Sources from config.yaml are removed from the file too.")) return;
           await post(`/api/sources/${id}`, null, "DELETE");
         } else {
-          await post(`/api/sources/${id}/status`, { status: b.dataset.status });
+          const r = await post(`/api/sources/${id}/status`, { status: b.dataset.status });
+          if (r.warning) alert(r.warning);
         }
         location.reload();
       } catch (err) {
         alert(err.message);
       }
     });
+  });
+
+  // Settings: tabs
+  const tabs = document.querySelectorAll(".tabs .tab");
+  if (tabs.length) {
+    const show = () => {
+      const name = (location.hash || "#profile").slice(1);
+      tabs.forEach((t) => t.classList.toggle("on", t.dataset.tab === name));
+      document.querySelectorAll(".tabpanel").forEach((p) => { p.hidden = p.id !== `tab-${name}`; });
+    };
+    window.addEventListener("hashchange", show);
+    show();
+  }
+
+  const setStatus = (el, msg, kind) => { el.textContent = msg; el.className = `status ${kind || ""}`; };
+  const lines = (v) => v.split("\n").map((s) => s.trim()).filter(Boolean);
+
+  // Settings: profile form
+  const profileForm = document.getElementById("profile-form");
+  if (profileForm) {
+    const list = document.getElementById("interests");
+    document.getElementById("add-interest").addEventListener("click", () => {
+      list.appendChild(document.getElementById("interest-template").content.cloneNode(true));
+      list.lastElementChild.querySelector("input").focus();
+    });
+    list.addEventListener("click", (e) => { if (e.target.closest(".remove")) e.target.closest(".interest-row").remove(); });
+    profileForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("profile-status");
+      const f = profileForm.elements;
+      const body = {
+        interests: [...list.querySelectorAll(".interest-row")]
+          .map((r) => ({ topic: r.querySelector("[name=topic]").value.trim(), weight: Number(r.querySelector("[name=weight]").value) }))
+          .filter((i) => i.topic),
+        dislikes: lines(f.dislikes.value),
+        exclude_keywords: lines(f.exclude_keywords.value),
+        notes: f.notes.value,
+        min_score: Number(f.min_score.value || 0),
+      };
+      setStatus(status, "Saving…");
+      try {
+        const r = await post("/api/profile", body);
+        setStatus(status, r.rescore ? "Saved. Upcoming events will be re-scored on the next run." : "Saved.", "ok");
+      } catch (err) {
+        setStatus(status, `Not saved: ${err.message}`, "err");
+      }
+    });
+  }
+
+  // Settings: raw config.yaml
+  const configForm = document.getElementById("config-form");
+  configForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("config-status");
+    setStatus(status, "Validating and saving…");
+    try {
+      const r = await post("/api/config", { text: configForm.elements.text.value, base_hash: configForm.elements.base_hash.value });
+      configForm.elements.base_hash.value = r.hash;
+      setStatus(status, r.restart_needed.length
+        ? `Saved. Restart the container to apply: ${r.restart_needed.join(", ")}.` : "Saved and applied.", "ok");
+    } catch (err) {
+      setStatus(status, `Not saved: ${err.message}`, "err");
+    }
   });
 })();

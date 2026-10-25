@@ -35,15 +35,15 @@ search:
 profile:
   min_score: 60             # events scoring below this are left out of picks/email/calendar
   interests:
-    - { topic: "live music in small venues (indie, folk, jazz)", weight: 5 }
-    - { topic: "comedy and improv shows", weight: 4 }
-    - { topic: "food and drink festivals, beer/wine tastings", weight: 4 }
-    - { topic: "outdoor activities: guided hikes, bike rides, nature walks", weight: 4 }
-    - { topic: "tech meetups, hackathons, maker events", weight: 3 }
-    - { topic: "museum exhibitions and gallery openings", weight: 3 }
-    - { topic: "author talks and lectures on science or history", weight: 3 }
-    - { topic: "trivia nights and board game events", weight: 2 }
-    - { topic: "big yard/garage sales, estate sales, citywide yard sale days, flea and vintage markets, record fairs, rummage and salvage sales", weight: 4 }
+    - {topic: "live music in small venues (indie, folk, jazz)", weight: 5}
+    - {topic: "comedy and improv shows", weight: 4}
+    - {topic: "food and drink festivals, beer/wine tastings", weight: 4}
+    - {topic: "outdoor activities: guided hikes, bike rides, nature walks", weight: 4}
+    - {topic: "tech meetups, hackathons, maker events", weight: 3}
+    - {topic: "museum exhibitions and gallery openings", weight: 3}
+    - {topic: "author talks and lectures on science or history", weight: 3}
+    - {topic: "trivia nights and board game events", weight: 2}
+    - {topic: "big yard/garage sales, estate sales, citywide yard sale days, flea and vintage markets, record fairs, rummage and salvage sales", weight: 4}
   dislikes:
     - children's storytime and toddler programs
     - networking mixers and sales pitches
@@ -121,7 +121,7 @@ email:
   password: ${SMTP_PASSWORD:-}
   starttls: true
   sender: ${EMAIL_FROM:-}
-  recipients: [ "${EMAIL_TO:-}" ]
+  recipients: ["${EMAIL_TO:-}"]
   subject: "EventScout: {count} events picked for you"
   only_new: false           # true = only email events first seen since the last email
 
@@ -163,7 +163,7 @@ sources:
   - name: Eventbrite — Boston
     url: https://www.eventbrite.com/d/ma--boston/all-events/
     kind: web
-    options: { pages: 3 }
+    options: {pages: 3}
   - name: Eventbrite — Newton
     url: https://www.eventbrite.com/d/ma--newton/all-events/
     kind: web
@@ -189,4 +189,4 @@ sources:
     url: https://app.ticketmaster.com/discovery/v2/events.json
     kind: ticketmaster
     enabled: false        # get a free key at developer.ticketmaster.com, set TICKETMASTER_API_KEY, then enable
-    options: { api_key: "${TICKETMASTER_API_KEY:-}" }
+    options: {api_key: "${TICKETMASTER_API_KEY:-}"}

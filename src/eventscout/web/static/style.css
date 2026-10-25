@@ -204,6 +204,37 @@ details.run { background: var(--surface); border: 1px solid var(--border); borde
 details.run summary { cursor: pointer; padding: 10px 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 13px; }
 details.run pre { margin: 0; padding: 12px 14px; border-top: 1px solid var(--border); font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; color: var(--text-2); max-height: 480px; overflow-y: auto; }
 
+/* settings */
+.tabs { display: flex; gap: 2px; }
+.tab { color: var(--text-2); padding: 6px 12px; border-radius: 7px; font-weight: 600; font-size: 14px; }
+.tab:hover { background: var(--surface-2); text-decoration: none; }
+.tab.on { color: var(--text); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.banner { padding: 10px 14px; border-radius: var(--radius); margin: 10px 0 14px; font-size: 13px; }
+.banner.warn { background: var(--accent-soft); color: var(--accent-text); }
+.form { display: flex; flex-direction: column; gap: 14px; }
+.form h4 { margin: 0; }
+.form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.form label .muted { font-weight: 400; }
+.form label.inline { flex-direction: row; align-items: center; gap: 10px; }
+.form textarea, .form input, .form select { font-weight: 400; }
+#add-interest { align-self: flex-start; }
+.form label.inline input { width: 90px; }
+.form .row2.gap { gap: 14px; }
+textarea {
+  width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 14px; resize: vertical;
+}
+textarea.code { font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 2; white-space: pre; }
+select {
+  padding: 7px 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit;
+}
+#interests { display: flex; flex-direction: column; gap: 6px; }
+.interest-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 30px; gap: 6px; align-items: center; }
+.form-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.status { font-size: 13px; color: var(--muted); }
+.status.ok { color: var(--good); }
+.status.err { color: var(--bad); }
+
 @media (max-width: 860px) {
   main { padding: 16px; }
   .layout { grid-template-columns: minmax(0, 1fr); }

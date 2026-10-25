@@ -135,6 +135,21 @@ Package settings → Change visibility), or log the server in once with a person
 To auto-update on the server, pin a tag in compose and run `docker compose pull && docker compose up -d` from cron,
 or use a tool like Watchtower.
 
+## Settings in the dashboard
+
+**Settings → Profile** edits your interests (with weights), dislikes, excluded keywords, notes and minimum score.
+**Settings → config.yaml** edits the whole file, for everything else. Both save to `config.yaml` and apply
+immediately, without a restart. The exceptions are `database`, `web`, `data_dir` and `home.timezone`, where the page
+tells you to restart. Sources you add, enable, disable or remove on the **Sources** page are written to `config.yaml`
+too, so the file stays the record of your setup. Discovered trial sources stay in the database.
+
+Saving keeps your comments, ordering and `${VAR}` placeholders, validates the result first (an invalid file is never
+written), and copies the previous version to `data/config-backups/` (the last 30 are kept). If you edit the file by
+hand while the page is open, saving from the raw editor refuses to overwrite your edit.
+
+The app needs write access to the file. The compose file mounts it read-write; on Linux hosts make it writable by the
+container user: `sudo chown 1000 config.yaml`. If it isn't writable, the Settings page says so and saving is disabled.
+
 ## Configuration highlights (`config.yaml`)
 
 - `profile.interests`: weighted topics that drive ranking. Changing the profile re-scores upcoming events.

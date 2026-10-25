@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set active = 'settings' %}
+{% block title %}Settings · EventScout{% endblock %}
+{% block content %}
+<div class="page narrow settings">
+  <div class="list-head">
+    <h1>Settings</h1>
+    <nav class="tabs" role="tablist">
+      <a href="#profile" class="tab" data-tab="profile">Profile</a>
+      <a href="#config" class="tab" data-tab="config">config.yaml</a>
+    </nav>
+  </div>
+
+  {% if read_only %}
+  <div class="banner warn"><b>Read-only.</b> {{ read_only }}</div>
+  {% endif %}
+
+  <section class="tabpanel" id="tab-profile">
+    <form id="profile-form" class="panel form">
+      <h4>Interests</h4>
+      <p class="muted small">What you'd like to see. Weight 5 = love it, 1 = mildly interested. The LLM ranks events against these.</p>
+      <div id="interests">
+        {% for i in profile.interests %}
+        <div class="interest-row">
+          <input type="text" name="topic" value="{{ i.topic }}" placeholder="e.g. small-venue jazz" required>
+          <select name="weight" aria-label="Weight">
+            {% for w in range(5, 0, -1) %}<option value="{{ w }}" {% if w == i.weight %}selected{% endif %}>{{ w }}</option>{% endfor %}
+          </select>
+          <button type="button" class="act remove" title="Remove" aria-label="Remove interest">×</button>
+        </div>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn small" id="add-interest">+ Add interest</button>
+
+      <div class="row2 gap">
+        <label>Not interested in <span class="muted">(one per line; softly lowers scores)</span>
+          <textarea name="dislikes" rows="6">{{ profile.dislikes | join('\n') }}</textarea></label>
+        <label>Always exclude keywords <span class="muted">(one per line; hard filter)</span>
+          <textarea name="exclude_keywords" rows="6">{{ profile.exclude_keywords | join('\n') }}</textarea></label>
+      </div>
+
+      <label>Other preferences <span class="muted">(free text: timing, budget, crowd size…)</span>
+        <textarea name="notes" rows="4">{{ profile.notes }}</textarea></label>
+
+      <label class="inline">Minimum score for picks
+        <input type="number" name="min_score" min="0" max="100" value="{{ profile.min_score }}"></label>
+
+      <div class="form-foot">
+        <button class="btn primary" type="submit" {% if read_only %}disabled{% endif %}>Save profile</button>
+        <span class="status" id="profile-status"></span>
+      </div>
+      <p class="muted small">Saved to <code>{{ config_path }}</code>. Changing the profile re-scores upcoming events on the next run, which uses the LLM.</p>
+    </form>
+  </section>
+
+  <section class="tabpanel" id="tab-config" hidden>
+    <form id="config-form" class="panel form">
+      <p class="muted small">The whole configuration file. <code>${VAR}</code> placeholders are filled from the environment and secret
+        files when loaded and are kept as-is here, so secret values never appear on this page. Saving validates the file first; the
+        previous version is kept in <code>data/config-backups/</code>.</p>
+      <textarea name="text" class="code" spellcheck="false" rows="32">{{ config_text }}</textarea>
+      <input type="hidden" name="base_hash" value="{{ config_hash }}">
+      <div class="form-foot">
+        <button class="btn primary" type="submit" {% if read_only %}disabled{% endif %}>Save config.yaml</button>
+        <a class="btn" href="/settings#config">Reload from disk</a>
+        <span class="status" id="config-status"></span>
+      </div>
+    </form>
+  </section>
+
+  <template id="interest-template">
+    <div class="interest-row">
+      <input type="text" name="topic" placeholder="e.g. small-venue jazz" required>
+      <select name="weight" aria-label="Weight">
+        {% for w in range(5, 0, -1) %}<option value="{{ w }}" {% if w == 3 %}selected{% endif %}>{{ w }}</option>{% endfor %}
+      </select>
+      <button type="button" class="act remove" title="Remove" aria-label="Remove interest">×</button>
+    </div>
+  </template>
+</div>
+{% endblock %}
