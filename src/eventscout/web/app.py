@@ -8,6 +8,7 @@ import secrets
 import threading
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -19,10 +20,10 @@ from pydantic import BaseModel, ValidationError
 from eventscout.config import Profile
 from eventscout.configfile import ConfigFileError, text_hash
 from eventscout.dates import now
-from eventscout.models import Trip
+from eventscout.models import Destination, Trip
 from eventscout.sources import Context
-from eventscout.trips import (TripError, build_trip, builtin_sources, geocode_place, trip_config, trip_events,
-                              trip_today, trip_window, validate_dates)
+from eventscout.trips import (CITY_CHECK_DAYS, TripError, build_trip, builtin_sources, city_stand_in, geocode_place,
+                              place_of, trip_config, trip_events, trip_today, trip_window, validate_dates)
 from eventscout.detect import detect_kind, trial_fetch
 from eventscout.http import Fetcher, FetchError
 from eventscout.llm import LLMError
@@ -112,6 +113,10 @@ class TripSource(BaseModel):
     name: str = ""
     kind: str | None = None  # given when saving a source the web search found (already checked)
     why: str = ""
+
+
+class CityPick(BaseModel):
+    destination: str
 
 
 class Enabled(BaseModel):
@@ -362,10 +367,10 @@ def create_app(svc: Service) -> FastAPI:
         _bg(build)
 
     @app.get("/trips", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
-    def trips_page():
+    def trips_page(destination: str = ""):
         today = now(svc.tz).date()
-        return page("trips.html", trips=svc.db.list_trips(), today=today,
-                    destinations=[d for d in svc.db.list_destinations() if d.source_count or d.builtins_off],
+        return page("trips.html", trips=svc.db.list_trips(), today=today, destination=destination,
+                    destinations=[d for d in svc.db.list_destinations() if d.source_count or d.builtins_off or d.place],
                     default_start=today + timedelta(days=7), default_end=today + timedelta(days=9),
                     can_discover=cfg.discovery.enabled)
 
@@ -404,16 +409,10 @@ def create_app(svc: Service) -> FastAPI:
         events = everything if view == "all" else picks
         today = trip_today(trip)
         places, unmapped = map_places(events, today)
-        dest = svc.db.ensure_destination(trip.dest_key, trip.name)
-        saved = svc.db.list_destination_sources(dest.key)
-        saved_urls = {s.url.rstrip("/") for s in saved}
-        last_run = {s.get("builtin"): s for s in trip.sources if s.get("origin") == "built-in"}
-        builtins = [{**b, "enabled": b["builtin"] not in dest.builtins_off, "last": last_run.get(b["builtin"])}
-                    for b in builtin_sources(trip, cfg)]
-        found = [s for s in trip.sources if s.get("origin") == "discovered" and s["url"].rstrip("/") not in saved_urls]
+        dest = svc.db.ensure_destination(trip.dest_key, trip.name, place_of(trip))
         return page(
             "trip.html", trip=trip, view=view, show=show, events=events, groups=group_by_day(events, today),
-            dest=dest, saved_sources=saved, builtins=builtins, found_sources=found,
+            **city_sources_ctx(dest, trip, api=f"/api/trips/{trip.id}"),
             pick_count=len(picks), all_count=len(everything), places=places, unmapped=unmapped,
             home={"lat": trip.latitude, "lon": trip.longitude, "label": trip.near or trip.name,
                   "radius_miles": trip.radius_miles},
@@ -435,17 +434,42 @@ def create_app(svc: Service) -> FastAPI:
         start_trip_build(trip_id)
         return {"ok": True}
 
-    # Saved sources belong to the trip's city, so every trip there (and every rebuild) uses them.
-    def _trip_source_or_404(trip: Trip, source_id: int):
+    # ------------------------------------------------------------ city sources
+    # Saved sources belong to a city, so every trip there (and every rebuild) uses them. They can be curated from
+    # a trip's page (checked against the trip's dates) or from the city's own page before any trip there.
+    def city_sources_ctx(dest: Destination, trip: Trip, api: str) -> dict:
+        """The sources panel: built-ins with their on/off switch, saved sources, and what the trip's search found."""
+        saved = svc.db.list_destination_sources(dest.key)
+        saved_urls = {s.url.rstrip("/") for s in saved}
+        last_run = {s.get("builtin"): s for s in trip.sources if s.get("origin") == "built-in"}
+        builtins = [{**b, "enabled": b["builtin"] not in dest.builtins_off, "last": last_run.get(b["builtin"])}
+                    for b in builtin_sources(trip, cfg)]
+        found = [s for s in trip.sources if s.get("origin") == "discovered" and s["url"].rstrip("/") not in saved_urls]
+        return {"dest": dest, "city_name": trip.city or trip.name, "sources_api": api, "saved_sources": saved,
+                "builtins": builtins, "found_sources": found}
+
+    def _city_or_404(key: str) -> tuple[Destination, Trip]:
+        """A city and a stand-in trip for it (its centre and the next two weeks)."""
+        dest = svc.db.get_destination(key)
+        if dest is None:
+            raise HTTPException(404, "no such city")
+        place = dest.place
+        if place is None:  # saved before cities stored their place: take it from a trip there
+            trip = next((t for t in svc.db.list_trips() if t.dest_key == key), None)
+            if trip is None:
+                raise HTTPException(404, "no such city")
+            place = place_of(trip)
+            svc.db.ensure_destination(key, dest.label, place)
+        return dest, city_stand_in(place)
+
+    def _source_or_404(dest_key: str, source_id: int):
         src = svc.db.get_destination_source(source_id)
-        if src is None or src.dest_key != trip.dest_key:
+        if src is None or src.dest_key != dest_key:
             raise HTTPException(404, "no such source for this city")
         return src
 
-    @app.post("/api/trips/{trip_id}/sources", dependencies=[Depends(require_auth)])
-    def add_trip_source(trip_id: int, body: TripSource):
-        trip = _trip_or_404(trip_id)
-        dest = svc.db.ensure_destination(trip.dest_key, trip.name)
+    def add_city_source(dest: Destination, trip: Trip, body: TripSource) -> dict:
+        city = trip.city or trip.name
         url = body.url.strip()
         if body.kind:  # found by the web search during a build; it was already checked then
             kind, note, found = body.kind, body.why or "found by web search", None
@@ -467,29 +491,76 @@ def create_app(svc: Service) -> FastAPI:
         sid = svc.db.add_destination_source(dest.key, name, url, kind, origin="discovered" if body.kind else "manual",
                                             notes=note)
         if sid is None:
-            raise HTTPException(409, f"{trip.city} already has that source")
+            raise HTTPException(409, f"{city} already has that source")
         return {"id": sid, "kind": kind, "events_found": found}
+
+    def set_city_builtin(dest: Destination, trip: Trip, builtin: str, enabled: bool) -> dict:
+        if builtin not in {b["builtin"] for b in builtin_sources(trip, cfg)}:
+            raise HTTPException(404, "no such built-in source")
+        svc.db.set_builtin_enabled(dest.key, builtin, enabled)
+        return {"ok": True}
+
+    # From a trip's page.
+    def _trip_city(trip_id: int) -> tuple[Destination, Trip]:
+        trip = _trip_or_404(trip_id)
+        return svc.db.ensure_destination(trip.dest_key, trip.name, place_of(trip)), trip
+
+    @app.post("/api/trips/{trip_id}/sources", dependencies=[Depends(require_auth)])
+    def add_trip_source(trip_id: int, body: TripSource):
+        return add_city_source(*_trip_city(trip_id), body)
 
     @app.post("/api/trips/{trip_id}/sources/{source_id}", dependencies=[Depends(require_auth)])
     def toggle_trip_source(trip_id: int, source_id: int, body: Enabled):
-        _trip_source_or_404(_trip_or_404(trip_id), source_id)
+        _source_or_404(_trip_or_404(trip_id).dest_key, source_id)
         svc.db.update_destination_source(source_id, enabled=body.enabled)
         return {"ok": True}
 
     @app.delete("/api/trips/{trip_id}/sources/{source_id}", dependencies=[Depends(require_auth)])
     def remove_trip_source(trip_id: int, source_id: int):
-        _trip_source_or_404(_trip_or_404(trip_id), source_id)
+        _source_or_404(_trip_or_404(trip_id).dest_key, source_id)
         svc.db.delete_destination_source(source_id)
         return {"ok": True}
 
     @app.post("/api/trips/{trip_id}/builtins/{builtin}", dependencies=[Depends(require_auth)])
     def toggle_trip_builtin(trip_id: int, builtin: str, body: Enabled):
-        trip = _trip_or_404(trip_id)
-        if builtin not in {b["builtin"] for b in builtin_sources(trip, cfg)}:
-            raise HTTPException(404, "no such built-in source")
-        svc.db.ensure_destination(trip.dest_key, trip.name)
-        svc.db.set_builtin_enabled(trip.dest_key, builtin, body.enabled)
+        return set_city_builtin(*_trip_city(trip_id), builtin, body.enabled)
+
+    # From the city's own page, with or without any trip there.
+    @app.post("/api/cities", dependencies=[Depends(require_auth)])
+    def open_city(body: CityPick):
+        try:
+            place = geocode_place(body.destination.strip(), cfg)
+        except TripError as exc:
+            raise HTTPException(422, str(exc))
+        dest = svc.db.ensure_destination(place.dest_key, place.label, place.as_dict())
+        return {"key": dest.key, "name": place.label, "url": f"/trips/cities/{quote(dest.key, safe='')}"}
+
+    @app.get("/trips/cities/{key}", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def city_page(key: str):
+        dest, stand_in = _city_or_404(key)
+        trips = [t for t in svc.db.list_trips() if t.dest_key == dest.key]
+        return page("city.html", place=stand_in, trips=trips, check_days=CITY_CHECK_DAYS,
+                    **city_sources_ctx(dest, stand_in, api=f"/api/cities/{quote(dest.key, safe='')}"))
+
+    @app.post("/api/cities/{key}/sources", dependencies=[Depends(require_auth)])
+    def add_city_source_route(key: str, body: TripSource):
+        return add_city_source(*_city_or_404(key), body)
+
+    @app.post("/api/cities/{key}/sources/{source_id}", dependencies=[Depends(require_auth)])
+    def toggle_city_source(key: str, source_id: int, body: Enabled):
+        _source_or_404(_city_or_404(key)[0].key, source_id)
+        svc.db.update_destination_source(source_id, enabled=body.enabled)
         return {"ok": True}
+
+    @app.delete("/api/cities/{key}/sources/{source_id}", dependencies=[Depends(require_auth)])
+    def remove_city_source(key: str, source_id: int):
+        _source_or_404(_city_or_404(key)[0].key, source_id)
+        svc.db.delete_destination_source(source_id)
+        return {"ok": True}
+
+    @app.post("/api/cities/{key}/builtins/{builtin}", dependencies=[Depends(require_auth)])
+    def toggle_city_builtin(key: str, builtin: str, body: Enabled):
+        return set_city_builtin(*_city_or_404(key), builtin, body.enabled)
 
     @app.delete("/api/trips/{trip_id}", dependencies=[Depends(require_auth)])
     def delete_trip(trip_id: int):

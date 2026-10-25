@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS destinations (
     key TEXT PRIMARY KEY,
     label TEXT NOT NULL,
     builtins_off JSONB NOT NULL DEFAULT '[]',  -- built-in sources switched off for this city
+    place JSONB,  -- the geocoded city, so its sources can be curated before any trip there
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -209,10 +210,11 @@ MIGRATIONS = [
     'ALTER TABLE score_cache ADD COLUMN IF NOT EXISTS detail JSONB',
     'ALTER TABLE events ADD COLUMN IF NOT EXISTS trip_id BIGINT REFERENCES trips(id) ON DELETE CASCADE',
     'CREATE INDEX IF NOT EXISTS idx_events_trip_date ON events (trip_id, start_date)',
+    'ALTER TABLE destinations ADD COLUMN IF NOT EXISTS place JSONB',
 ]
 
 _JSON_COLUMNS = {"categories", "tags", "source_ids", "source_names", "options", "stats", "score_detail", "sources",
-                 "builtins_off"}
+                 "builtins_off", "place"}
 _BOOL_COLUMNS = {"all_day", "time_known", "location_approx", "online", "starred", "enriched", "geo_attempted",
                  "image_checked", "is_free", "discover", "enabled"}
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
@@ -661,9 +663,14 @@ class Database:
             c.execute("DELETE FROM trips WHERE id = %s", (trip_id,))
 
     # -------------------------------------------------------- destinations
-    def ensure_destination(self, key: str, label: str) -> Destination:
+    def ensure_destination(self, key: str, label: str, place: dict | None = None) -> Destination:
+        """The city's row, created if needed. A given place fills in one that wasn't stored yet."""
         with self.conn() as c:
-            c.execute("INSERT INTO destinations (key, label) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, label))
+            c.execute(
+                "INSERT INTO destinations (key, label, place) VALUES (%s, %s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET place = COALESCE(destinations.place, EXCLUDED.place)",
+                (key, label, Jsonb(place) if place else None),
+            )
             row = c.execute("SELECT * FROM destinations WHERE key = %s", (key,)).fetchone()
         return Destination.model_validate(dict(row))
 

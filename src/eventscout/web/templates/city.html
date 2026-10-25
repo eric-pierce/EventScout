@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set active = 'trips' %}
+{% block title %}{{ place.city }} · Trips · EventScout{% endblock %}
+{% block content %}
+<div class="page" id="city">
+  <a class="muted small" href="/trips">← All trips</a>
+  <div class="list-head trip-head">
+    <div>
+      <h1>{{ place.name }}</h1>
+      <span class="muted">The sources every trip here uses. New ones are checked against the next {{ check_days }} days.</span>
+    </div>
+    <div class="actions-row">
+      <a class="btn primary" href="/trips?destination={{ place.name | urlencode }}#trip-form">Plan a trip here</a>
+    </div>
+  </div>
+
+  {% include "_city_sources.html" %}
+
+  {% if trips %}
+  <h2 class="day">Trips to {{ city_name }}</h2>
+  {% for t in trips %}
+  <a class="trip-row" href="/trips/{{ t.id }}">
+    <div>
+      <div class="trip-name">{{ t.dates_display }}</div>
+      <div class="muted small">within {{ t.radius_miles | round | int }} mi{% if t.near %} of {{ t.near }}{% endif %}</div>
+    </div>
+    <div class="trip-meta">
+      {% if t.status == 'done' %}<span class="muted small">{{ t.stats.get('picks', 0) }} picks · {{ t.event_count or 0 }} events</span>{% endif %}
+    </div>
+  </a>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

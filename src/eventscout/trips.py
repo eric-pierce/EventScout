@@ -12,8 +12,8 @@ import logging
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
-from datetime import date, datetime, time as dtime, timezone
+from dataclasses import asdict, dataclass
+from datetime import date, datetime, time as dtime, timedelta, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -25,7 +25,7 @@ from eventscout.dates import now
 from eventscout.db import Database, domain_of
 from eventscout.http import Fetcher, FetchError
 from eventscout.llm import LLM, LLMError
-from eventscout.models import Source, Trip
+from eventscout.models import Source, Trip, dest_key_for
 from eventscout.pipeline import PipelineSteps, RunLog
 from eventscout.sources import Context
 
@@ -50,6 +50,33 @@ class Place:
     region_code: str | None  # "US-IL"
     country: str | None
     country_code: str | None  # "us"
+
+    @property
+    def dest_key(self) -> str:
+        return dest_key_for(self.name, self.region_code, self.country_code)
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+def place_of(trip: Trip) -> dict:
+    """The Place fields of a trip's city (stored on the city so it can be curated without a trip)."""
+    return Place(name=trip.city or trip.name, label=trip.name, latitude=trip.latitude, longitude=trip.longitude,
+                 timezone=trip.timezone, region=trip.region, region_code=trip.region_code, country=trip.country,
+                 country_code=trip.country_code).as_dict()
+
+
+CITY_CHECK_DAYS = 14  # with no trip yet, new sources are checked against the next two weeks
+
+
+def city_stand_in(place: dict) -> Trip:
+    """A stand-in trip for curating a city's sources before any trip there: the next two weeks, from the centre."""
+    p = Place(**{k: place.get(k) for k in Place.__dataclass_fields__})
+    today = now(ZoneInfo(p.timezone)).date()
+    return Trip(id=0, name=p.label, query=p.label, latitude=p.latitude, longitude=p.longitude, timezone=p.timezone,
+                city=p.name, region=p.region, region_code=p.region_code, country=p.country, country_code=p.country_code,
+                start_date=today, end_date=today + timedelta(days=CITY_CHECK_DAYS), discover=False, status="done",
+                created_at=datetime.now(timezone.utc))
 
 
 def geocode_place(query: str, cfg: Config, *, client: httpx.Client | None = None) -> Place:
@@ -204,7 +231,7 @@ def build_trip(svc, trip_id: int) -> dict:
     status = "done"
     try:
         rl(f"building {trip.name}, {trip.dates_display}, within {trip.radius_miles:g} mi")
-        dest = db.ensure_destination(trip.dest_key, trip.name)
+        dest = db.ensure_destination(trip.dest_key, trip.name, place_of(trip))
         specs = [s for s in builtin_sources(trip, svc.cfg) if s.get("builtin") not in dest.builtins_off]
         saved = db.list_destination_sources(dest.key, enabled_only=True)
         if saved:

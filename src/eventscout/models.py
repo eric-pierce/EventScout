@@ -122,6 +122,12 @@ class Source(BaseModel):
         return cls.model_validate(d)
 
 
+def dest_key_for(city: str, region_code: str | None, country_code: str | None) -> str:
+    """A city's key for its saved trip sources, e.g. "chicago|us-il|us"."""
+    slug = re.sub(r"[^a-z0-9]+", "-", city.lower()).strip("-")
+    return f"{slug}|{(region_code or '').lower()}|{(country_code or '').lower()}"
+
+
 class Trip(BaseModel):
     """A one-time report for a city you're visiting."""
 
@@ -153,8 +159,7 @@ class Trip(BaseModel):
     @property
     def dest_key(self) -> str:
         """Identity of the destination, shared by every trip to the same city: saved sources hang off this."""
-        city = re.sub(r"[^a-z0-9]+", "-", (self.city or self.name).lower()).strip("-")
-        return f"{city}|{(self.region_code or '').lower()}|{(self.country_code or '').lower()}"
+        return dest_key_for(self.city or self.name, self.region_code, self.country_code)
 
     @property
     def nights(self) -> int:
@@ -174,6 +179,7 @@ class Destination(BaseModel):
     key: str
     label: str
     builtins_off: list[str] = Field(default_factory=list)
+    place: dict[str, Any] | None = None  # the geocoded city (trips.Place fields), so it can be curated without a trip
     created_at: datetime
     source_count: int | None = None
 

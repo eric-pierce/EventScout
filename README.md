@@ -170,10 +170,13 @@ A build runs the regular pipeline once, with the destination standing in for hom
   in the destination's time zone. Ratings you give on a trip report teach the ranker for home too.
 
 **Saved sources per city.** Each destination (city + state + country) keeps its own source list, reused by every
-trip there. On a trip's page, under *Sources for &lt;city&gt;*, you can:
+trip there. You can curate it before you plan a trip: under *Sources by city* on the Trips page, enter a city and
+choose **Edit sources** to open its page, or click a city you've already curated. A trip's own page shows the same list
+under *Sources for &lt;city&gt;*. On either page you can:
 
-- **Add** a venue calendar, listings page, `.ics` or RSS feed. It's checked against the trip dates and saved for that city.
-- **Save** a source the web search found during a build.
+- **Add** a venue calendar, listings page, `.ics` or RSS feed. It's checked for events on the trip dates (or the next
+  14 days, on a city's page) and saved for that city.
+- **Save** a source the web search found during a build (on a trip's page).
 - **Switch** the built-in sources (Eventbrite, AllEvents, Meetup, Ticketmaster) on or off for that city.
 
 Changes apply the next time you build or rebuild a trip there. Visiting the same city again starts with that curated

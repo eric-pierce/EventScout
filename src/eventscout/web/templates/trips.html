@@ -11,7 +11,7 @@
   <form id="trip-form" class="panel form">
     <h4>Plan a trip</h4>
     <label>Destination
-      <input type="text" name="destination" placeholder="Chicago, IL · Lisbon · Asheville, NC" required autocomplete="off"></label>
+      <input type="text" name="destination" value="{{ destination }}" placeholder="Chicago, IL · Lisbon · Asheville, NC" required autocomplete="off"></label>
     <div class="row3">
       <label>From<input type="date" name="start_date" value="{{ default_start.isoformat() }}" min="{{ today.isoformat() }}" required></label>
       <label>To<input type="date" name="end_date" value="{{ default_end.isoformat() }}" min="{{ today.isoformat() }}" required></label>
@@ -31,11 +31,21 @@
     </div>
   </form>
 
-  {% if destinations %}
-  <p class="muted small saved-cities">Saved sources:
-    {% for d in destinations %}<span class="chip">{{ d.label.split(',')[0] }} · {{ d.source_count }}{% if d.builtins_off %} · {{ d.builtins_off | length }} built-in off{% endif %}</span>{% endfor %}
-    · used automatically when you plan a trip there.</p>
-  {% endif %}
+  <section class="panel city-picker">
+    <h4>Sources by city</h4>
+    <p class="muted small">Add venue calendars and local listings for a city before you plan a trip there, or switch off
+      built-in sources that don't work for it. Every trip to that city uses them.</p>
+    {% if destinations %}
+    <div class="saved-cities">
+      {% for d in destinations %}<a class="chip" href="/trips/cities/{{ d.key | urlencode }}">{{ d.label.split(',')[0] }}{% if d.source_count %} · {{ d.source_count }} saved{% endif %}{% if d.builtins_off %} · {{ d.builtins_off | length }} built-in off{% endif %}</a>{% endfor %}
+    </div>
+    {% endif %}
+    <form class="add-source" id="city-form">
+      <input type="text" name="destination" placeholder="City, e.g. Chicago, IL" required autocomplete="off">
+      <button class="btn" type="submit">Edit sources</button>
+      <span class="muted" id="city-status"></span>
+    </form>
+  </section>
 
   {% if trips %}
   <h2 class="day">Your trips</h2>

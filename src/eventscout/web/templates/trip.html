@@ -68,57 +68,7 @@
       {% endfor %}
     {% endif %}
 
-    <section class="panel trip-sources" id="city-sources">
-      <h4>Sources for {{ trip.city }}</h4>
-      <p class="muted small">Used for every trip to {{ trip.city }}. Saved sources and switches apply the next time you build or
-        <b>Rebuild</b> a {{ trip.city }} trip.</p>
-      <table class="sources">
-        <thead><tr><th>Source</th><th>Type</th><th class="num">Last build</th><th></th></tr></thead>
-        <tbody>
-        {% for b in builtins %}
-          <tr class="{{ '' if b.enabled else 'st-disabled' }}">
-            <td><div class="sname">{{ b.name }}</div><a class="surl" href="{{ b.url }}" target="_blank" rel="noopener">{{ b.url }}</a>
-              {% if b.last and b.last.error %}<div class="err">{{ b.last.error }}</div>{% endif %}</td>
-            <td class="small">built-in</td>
-            <td class="num">{{ b.last.events if b.last else '—' }}</td>
-            <td class="row-actions"><button class="btn small" data-builtin="{{ b.builtin }}" data-enabled="{{ 'false' if b.enabled else 'true' }}">{{ 'Turn off' if b.enabled else 'Turn on' }}</button></td>
-          </tr>
-        {% endfor %}
-        {% for s in saved_sources %}
-          <tr class="{{ '' if s.enabled else 'st-disabled' }}">
-            <td><div class="sname">{{ s.name }}</div><a class="surl" href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url }}</a>
-              {% if s.last_error %}<div class="err">{{ s.last_error }}</div>{% endif %}{% if s.notes %}<div class="muted small">{{ s.notes }}</div>{% endif %}</td>
-            <td class="small">saved · {{ s.kind }}</td>
-            <td class="num">{{ s.last_event_count if s.last_event_count is not none else 'not built yet' }}</td>
-            <td class="row-actions">
-              <button class="btn small" data-saved="{{ s.id }}" data-enabled="{{ 'false' if s.enabled else 'true' }}">{{ 'Turn off' if s.enabled else 'Turn on' }}</button>
-              <button class="btn small danger" data-saved-delete="{{ s.id }}">Remove</button>
-            </td>
-          </tr>
-        {% endfor %}
-        {% for f in found_sources %}
-          <tr>
-            <td><div class="sname">{{ f.name }}</div><a class="surl" href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }}</a>
-              {% if f.why %}<div class="muted small">{{ f.why }}</div>{% endif %}</td>
-            <td class="small">found by web search</td>
-            <td class="num">{{ f.events }}</td>
-            <td class="row-actions"><button class="btn small primary" data-save-found='{{ {"name": f.name, "url": f.url, "kind": f.kind, "why": f.why or ""} | tojson }}'>Save for {{ trip.city }}</button></td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      <form class="add-source" id="trip-source-form">
-        <input type="url" name="url" placeholder="https://… a {{ trip.city }} venue calendar, listings page, .ics or RSS feed" required>
-        <input type="text" name="name" placeholder="Name (optional)">
-        <button class="btn primary" type="submit">Add for {{ trip.city }}</button>
-        <span class="muted" id="trip-source-status"></span>
-      </form>
-      <details class="build-log">
-        <summary>Last build log{% if trip.built_at %} · {{ trip.built_at | ts }}{% endif %}</summary>
-        {% if trip.stats.get('llm') %}<p class="muted small">LLM: {{ trip.stats.llm.calls }} calls, {{ '{:,}'.format(trip.stats.llm.input_tokens) }} in / {{ '{:,}'.format(trip.stats.llm.output_tokens) }} out tokens{% if trip.stats.llm.web_searches %}, {{ trip.stats.llm.web_searches }} web searches{% endif %} · {{ trip.stats.get('seconds') }}s</p>{% endif %}
-        <pre class="trip-log-final">{{ trip.log }}</pre>
-      </details>
-    </section>
+    {% include "_city_sources.html" %}
   {% endif %}
 </div>
 {% endblock %}

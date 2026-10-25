@@ -232,4 +232,52 @@ def test_trip_page_curates_city_sources(cfg, trip_sources, monkeypatch):
     foreign = svc.db.add_destination_source(other.key, "X", "https://x.example/", "web")
     assert client.delete(f"/api/trips/{trip.id}/sources/{foreign}").status_code == 404
 
-    assert "Saved sources:" in client.get("/trips").text and "Chicago · 1" in client.get("/trips").text
+    trips_page = client.get("/trips").text
+    assert "Sources by city" in trips_page and "Chicago · 1 saved" in trips_page
+    assert 'href="/trips/cities/chicago%7Cus-il%7Cus"' in trips_page
+
+
+def test_city_sources_can_be_curated_before_any_trip(cfg, trip_sources, monkeypatch):
+    from eventscout.detect import Detection
+
+    monkeypatch.setattr("eventscout.web.app.geocode_place", lambda q, c: CHICAGO)
+    monkeypatch.setattr("eventscout.web.app.detect_kind", lambda url, f, ctx: Detection("ical", url + "feed.ics", "linked iCal feed"))
+    windows = []
+    monkeypatch.setattr("eventscout.web.app.trial_fetch",
+                        lambda det, name, ctx: windows.append((ctx.window_start, ctx.window_end)) or [object()])
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    client = TestClient(create_app(svc))
+
+    r = client.post("/api/cities", json={"destination": "Chicago, IL"})
+    assert r.status_code == 200 and r.json()["url"] == "/trips/cities/chicago%7Cus-il%7Cus"
+    page = client.get(r.json()["url"]).text
+    assert "Sources for Chicago" in page and "Fake Chicago" in page and "Plan a trip here" in page
+    assert "Last build log" not in page  # that's for trip pages
+    api = "/api/cities/chicago%7Cus-il%7Cus"
+
+    added = client.post(f"{api}/sources", json={"url": "https://hideout.example/", "name": "The Hideout"})
+    assert added.status_code == 200 and added.json()["kind"] == "ical"
+    start, end = windows[0]  # no trip yet: checked against the next two weeks in Chicago
+    assert start.tzinfo == CHI and (end.date() - datetime.now(CHI).date()).days == 14
+    assert client.post(f"{api}/sources", json={"url": "https://hideout.example/"}).status_code == 409
+    assert client.post(f"{api}/builtins/fakebrite", json={"enabled": False}).status_code == 200
+    assert client.post(f"{api}/builtins/nope", json={"enabled": False}).status_code == 404
+    other = svc.db.ensure_destination("lisbon||pt", "Lisbon")
+    foreign = svc.db.add_destination_source(other.key, "X", "https://x.example/", "web")
+    assert client.delete(f"{api}/sources/{foreign}").status_code == 404
+    assert client.get("/trips/cities/nowhere%7C%7C").status_code == 404
+    assert "Chicago · 1 saved · 1 built-in off" in client.get("/trips").text
+    assert 'value="Chicago, Illinois, United States"' in client.get(
+        "/trips?destination=Chicago,%20Illinois,%20United%20States").text
+
+    # The first trip there uses what was curated.
+    trip = make_trip(svc)
+    build_trip(svc, trip.id)
+    assert [s["name"] for s in svc.db.get_trip(trip.id).sources] == ["The Hideout"]
+    page = client.get(f"/trips/{trip.id}").text
+    assert "The Hideout" in page and 'data-api="/api/trips/' in page and "Last build log" in page
+
+    # A city with no stored place and no trip there can't be opened.
+    svc.db.ensure_destination("evanston|us-il|us", "Evanston")
+    assert client.get("/trips/cities/evanston%7Cus-il%7Cus").status_code == 404  # no place and no trip
