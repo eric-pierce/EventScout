@@ -16,31 +16,43 @@ class LLMError(Exception):
     pass
 
 
+_COUNTERS = ("calls", "input_tokens", "output_tokens", "cache_read_tokens", "web_searches")
+
+
 @dataclass
 class Usage:
+    """Running token counts, in total and per task (extract, score, discover, ...)."""
+
     calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
     web_searches: int = 0
+    by_task: dict[str, dict[str, int]] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def add(self, *, inp: int = 0, out: int = 0, cache_read: int = 0, searches: int = 0) -> None:
+    def add(self, *, task: str = "other", inp: int = 0, out: int = 0, cache_read: int = 0, searches: int = 0) -> None:
         with self._lock:
-            self.calls += 1
-            self.input_tokens += inp
-            self.output_tokens += out
-            self.cache_read_tokens += cache_read
-            self.web_searches += searches
+            row = self.by_task.setdefault(task, dict.fromkeys(_COUNTERS, 0))
+            for name, n in zip(_COUNTERS, (1, inp, out, cache_read, searches)):
+                setattr(self, name, getattr(self, name) + n)
+                row[name] += n
 
     def as_dict(self) -> dict:
-        return {
-            "calls": self.calls,
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
-            "cache_read_tokens": self.cache_read_tokens,
-            "web_searches": self.web_searches,
-        }
+        with self._lock:
+            return {**{name: getattr(self, name) for name in _COUNTERS},
+                    "by_task": {task: dict(row) for task, row in self.by_task.items()}}
+
+
+def usage_delta(after: dict, before: dict | None) -> dict:
+    """Usage between two `Usage.as_dict()` snapshots (e.g. one run's share of a long-lived client)."""
+    before = before or {}
+
+    def diff(a: dict, b: dict) -> dict:
+        return {name: max(0, a.get(name, 0) - b.get(name, 0)) for name in _COUNTERS}
+
+    tasks = {task: diff(row, before.get("by_task", {}).get(task, {})) for task, row in after.get("by_task", {}).items()}
+    return {**diff(after, before), "by_task": {t: row for t, row in tasks.items() if row["calls"]}}
 
 
 class LLM(ABC):
@@ -52,7 +64,8 @@ class LLM(ABC):
 
     @abstractmethod
     def json(self, *, system: str, user: str, schema: dict, task: str) -> dict:
-        """Return a JSON object matching `schema`. `task` is one of extract|score|discover (tunes effort)."""
+        """Return a JSON object matching `schema`. `task` (extract|score|discover) tunes effort and labels
+        the token counts."""
 
     def research(self, *, system: str, user: str) -> str:
         raise LLMError(f"{self.name} has no built-in web search")

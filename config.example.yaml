@@ -62,7 +62,7 @@ profile:
 llm:
   provider: claude          # claude | ollama
   claude:
-    model: claude-opus-5    # set claude-sonnet-5 or claude-haiku-4-5 to cut cost
+    model: claude-opus-5-5  # claude-sonnet-5-5 or claude-haiku-5-5 cost less (compare scores first)
     effort_extract: low
     effort_score: low
     effort_discover: high

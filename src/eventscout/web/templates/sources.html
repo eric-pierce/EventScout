@@ -34,9 +34,9 @@
         </td>
         <td><code>{{ s.kind }}</code></td>
         <td><span class="pill {{ s.status }}">{{ s.status }}</span></td>
-        <td class="small">{{ s.last_run_at | ts }}</td>
-        <td class="num">{{ s.last_event_count }}</td>
-        <td class="num">{{ s.relevant_events }}</td>
+        <td class="small" data-label="Last run">{{ s.last_run_at | ts }}</td>
+        <td class="num" data-label="Events">{{ s.last_event_count }}</td>
+        <td class="num" data-label="Relevant">{{ s.relevant_events }}</td>
         <td class="row-actions">
           {% if s.status in ('active', 'trial') %}
             <button class="btn small" data-status="disabled">Disable</button>

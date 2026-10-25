@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -78,6 +79,59 @@ def test_full_run(cfg, fake_adapter):
     stats = svc.run()
     assert "score" not in llm.calls
     assert stats["score"]["scored"] == 0
+    assert stats["llm"]["by_task"] == {} and stats["llm"]["calls"] == 0  # this run's share only
+
+    # Changing only the picks cut-off or the keyword filter doesn't re-score anything.
+    cfg.profile.min_score = 75
+    cfg.profile.exclude_keywords = [*cfg.profile.exclude_keywords, "timeshare"]
+    stats = svc.run()
+    assert "score" not in llm.calls and stats["score"]["scored"] == 0
+    cfg.profile.notes = "Prefers late shows"
+    stats = svc.run()
+    assert stats["score"]["scored"] == 4
+
+
+def test_scores_saved_under_the_old_fingerprint_carry_over(cfg, fake_adapter):
+    from eventscout.tasks import score_key
+
+    fake_adapter.events = [
+        RawEvent(title="Jazz Night", start=at(1, 21), venue_name="Wally's"),
+        RawEvent(title="Comedy Hour", start=at(2, 20), venue_name="Comedy Studio"),
+    ]
+    svc = Service(cfg)
+    llm = FakeLLM()
+    svc._llm = llm
+    svc.run()
+    # Make it look like these were scored before the upgrade: keys built with the old fingerprint.
+    legacy = cfg.profile.legacy_fingerprint()
+    assert legacy != cfg.profile.fingerprint()
+    jazz, comedy = svc.db.upcoming_events(at(-1), at(5))
+    svc.db.update_event(jazz.id, score_key=score_key(jazz, legacy))
+    svc.db.put_cached_score(score_key(comedy, legacy), 70, "old", [], None)
+    svc.db.update_event(comedy.id, score=None, score_key=None)
+    with svc.db.conn() as c:
+        c.execute("DELETE FROM score_cache WHERE key IN (%s, %s)",
+                  (score_key(jazz, cfg.profile.fingerprint()), score_key(comedy, cfg.profile.fingerprint())))
+
+    llm.calls.clear()
+    stats = svc.run()
+    assert "score" not in llm.calls and stats["score"] == {"scored": 0, "cached": 2}
+    jazz, comedy = svc.db.upcoming_events(at(-1), at(5))
+    assert jazz.score_key == score_key(jazz, cfg.profile.fingerprint()) and jazz.score == 90
+    assert comedy.score == 70 and svc.db.get_cached_score(comedy.score_key)[1] == "old"
+
+
+def test_feedback_examples_are_in_the_cached_system_prompt(cfg, fake_adapter):
+    fake_adapter.events = [RawEvent(title="Jazz Night", start=at(1, 21), venue_name="Wally's")]
+    svc = Service(cfg)
+    llm = FakeLLM()
+    svc._llm = llm
+    svc.run()
+    ev = svc.db.upcoming_events(at(-1), at(5))[0]
+    svc.db.set_feedback(ev.id, 1)
+    fake_adapter.events = [RawEvent(title="Blues Night", start=at(2, 21), venue_name="Wally's")]
+    svc.run()
+    assert "+ Jazz Night @ Wally's" in llm.systems[-1]
 
 
 def test_web_app(cfg, fake_adapter):
@@ -336,5 +390,62 @@ def test_map_view_groups_events_by_venue(cfg, fake_adapter):
     day1 = at(1).date().isoformat()
     d1 = client.get(f"/map?view=all&date={day1}").text
     assert "Lizard Lounge" not in d1 and "Wally" in d1
-    assert f'href="/?view=all&amp;q=&amp;days=&amp;date={day1}' in d1
-    assert f'href="/map?view=all&amp;q=&amp;days=&amp;date={day1}' in client.get(f"/?view=all&date={day1}").text
+    assert f'href="/?view=all&amp;date={day1}"' in d1
+    assert f'href="/map?view=all&amp;date={day1}"' in client.get(f"/?view=all&date={day1}").text
+
+
+def test_runs_page_shows_tokens_by_task(cfg, fake_adapter):
+    fake_adapter.events = [RawEvent(title="Jazz Night", start=at(1, 21), venue_name="Wally's")]
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    html = TestClient(create_app(svc)).get("/runs").text
+    table = re.search(r'<table class="usage">.*?</table>', html, re.S).group(0)
+    assert "Scoring" in table and f"{cfg.llm.claude.model}: " in html
+
+
+def test_filter_by_start_time(cfg, fake_adapter):
+    fake_adapter.events = [
+        RawEvent(title="Jazz Brunch", start=at(1, 11), venue_name="Wally's"),
+        RawEvent(title="Jazz Matinee", start=at(1, 14), venue_name="Wally's"),
+        RawEvent(title="Jazz Evening Set", start=at(1, 20), venue_name="Wally's"),
+        RawEvent(title="Jazz After Hours", start=at(1, 23), venue_name="Wally's"),
+        RawEvent(title="Jazz Festival", start=at(2, 0), all_day=True, venue_name="Common"),
+        RawEvent(title="Jazz Sometime", start=at(2, 0), time_known=False, venue_name="Wally's"),
+    ]
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    client = TestClient(create_app(svc))
+
+    def titles(qs):
+        html = client.get(f"/?view=picks&{qs}").text
+        return {t for t in ("Brunch", "Matinee", "Evening Set", "After Hours", "Festival", "Sometime") if f"Jazz {t}" in html}
+
+    assert titles("") == {"Brunch", "Matinee", "Evening Set", "After Hours", "Festival", "Sometime"}
+    assert titles("after=17:00") == {"Evening Set", "After Hours", "Festival"}  # all-day kept, no-time dropped
+    assert titles("before=12:00") == {"Brunch", "Festival"}
+    assert titles("after=12:00&before=17:00") == {"Matinee", "Festival"}
+    assert titles("after=22:00&before=02:00") == {"After Hours", "Festival"}  # wraps past midnight
+    assert titles("after=junk&before=") == titles("")  # bad values are ignored
+
+    html = client.get("/?view=picks&after=17:00").text
+    assert "starting after 5 PM" in html and "Any time ×" in html and 'value="17:00"' in html
+    assert 'class="tag on" href="?view=picks&amp;after=17%3A00">Evening' in html
+    # The time window survives switching to the map, picking a date and clearing the date.
+    assert 'href="/map?view=picks&amp;after=17%3A00"' in html
+    day1 = at(1).date().isoformat()
+    assert f'href="?view=picks&amp;date={day1}&amp;after=17%3A00"' in html
+    assert len(svc.db.upcoming_events(at(-1), at(5))) == 6
+
+
+def test_picks_filters_apply_before_the_cap(cfg, fake_adapter):
+    # 3 picks fit the cap; the filter must find the matching one even though it isn't among the top 3 overall.
+    cfg.report.max_events = 3
+    fake_adapter.events = [RawEvent(title=f"Jazz Night {i}", start=at(1, 20), venue_name=f"Club {i}") for i in range(4)]
+    fake_adapter.events.append(RawEvent(title="Comedy Brunch", start=at(1, 11), venue_name="Comedy Studio"))
+    svc = Service(cfg)
+    svc._llm = FakeLLM()
+    svc.run()
+    html = TestClient(create_app(svc)).get("/?view=picks&before=12:00").text
+    assert "Comedy Brunch" in html

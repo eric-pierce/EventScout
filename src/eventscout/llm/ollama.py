@@ -38,7 +38,7 @@ class OllamaLLM(LLM):
         if resp.status_code >= 400:
             raise LLMError(f"Ollama HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
-        self.usage.add(inp=data.get("prompt_eval_count", 0) or 0, out=data.get("eval_count", 0) or 0)
+        self.usage.add(task=task, inp=data.get("prompt_eval_count", 0) or 0, out=data.get("eval_count", 0) or 0)
         if data.get("done_reason") == "length":
             raise LLMError("Ollama output truncated (raise ollama.num_ctx)")
         content = (data.get("message") or {}).get("content", "")

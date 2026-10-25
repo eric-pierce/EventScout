@@ -8,7 +8,7 @@ import secrets
 import threading
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -20,7 +20,7 @@ from pydantic import BaseModel, ValidationError
 from eventscout.config import Profile
 from eventscout.configfile import ConfigFileError, text_hash
 from eventscout.dates import now
-from eventscout.models import Destination, Trip
+from eventscout.models import Destination, Event, Trip
 from eventscout.sources import Context
 from eventscout.trips import (CITY_CHECK_DAYS, TripError, build_trip, builtin_sources, city_stand_in, geocode_place,
                               place_of, trip_config, trip_events, trip_today, trip_window, validate_dates)
@@ -79,6 +79,40 @@ def _opt_num(value: str, kind: type[int] | type[float]) -> int | float | None:
     except (TypeError, ValueError):
         return None
     return num if num == num and num >= 0 else None  # rejects NaN and negatives
+
+
+def _opt_time(value: str) -> dt.time | None:
+    """A "HH:MM" from a time box; blank or junk means "not set"."""
+    try:
+        return dt.time.fromisoformat(value.strip()) if value and value.strip() else None
+    except ValueError:
+        return None
+
+
+# Shortcuts under the time boxes: (label, starts after, starts before).
+TIME_PRESETS = [("Morning", "", "12:00"), ("Afternoon", "12:00", "17:00"), ("Evening", "17:00", "")]
+
+
+def starts_in_window(ev: Event, after: dt.time | None, before: dt.time | None, tz: ZoneInfo) -> bool:
+    """Does the event start in [after, before)? A window that wraps past midnight (after 21:00, before 02:00)
+    covers the late night. All-day events always match; events with no listed time never do."""
+    if after is None and before is None:
+        return True
+    if ev.all_day:
+        return True
+    if not ev.time_known:
+        return False
+    t = ev.start.astimezone(tz).time()
+    if after is not None and before is not None and after > before:
+        return t >= after or t < before
+    return (after is None or t >= after) and (before is None or t < before)
+
+
+def _query(view: str, filters: dict, **changes) -> str:
+    """The current view and filters as a query string, with some changed; blank values are left out."""
+    params = {"view": view, **filters, **changes}
+    return urlencode({k: ("true" if v is True else v) for k, v in params.items()
+                      if v is not None and v is not False and v != ""})
 
 
 class Feedback(BaseModel):
@@ -171,13 +205,14 @@ def create_app(svc: Service) -> FastAPI:
 
     # ------------------------------------------------------------------ pages
     def listing(view: str, q: str, days: str, date: str, min_score: str, max_miles: str, free: str,
-                tag: str) -> tuple[list, dict]:
+                tag: str, after: str = "", before: str = "") -> tuple[list, dict]:
         """Events for a view + filters, and the template context shared by the list and the map."""
         # The filter form submits empty boxes as "", so numeric filters arrive as text: blank or junk means "not set".
         days = _opt_num(days, int)
         min_score = _opt_num(min_score, int)
         max_miles = _opt_num(max_miles, float)
         free = free.lower() in ("1", "true", "on", "yes")
+        after_t, before_t = _opt_time(after), _opt_time(before)
         horizon = days or cfg.search.horizon_days
         today = now(svc.tz).date()
         last_day = today + timedelta(days=cfg.search.horizon_days)
@@ -191,8 +226,24 @@ def create_app(svc: Service) -> FastAPI:
             end = dt.datetime.combine(day, dt.time(23, 59), tzinfo=svc.tz)
         else:
             start, end = now(svc.tz), now(svc.tz) + timedelta(days=horizon)
+        checks = []
+        if q:
+            ql = q.lower()
+            checks.append(lambda e: ql in f"{e.title} {e.description} {e.venue_name} {e.city}".lower())
+        if max_miles is not None:
+            checks.append(lambda e: e.distance_miles is not None and e.distance_miles <= max_miles)
+        if free:
+            checks.append(lambda e: e.is_free or e.price_min == 0)
+        if tag:
+            checks.append(lambda e: tag in e.tags or tag in e.categories)
+        if after_t or before_t:
+            checks.append(lambda e: starts_in_window(e, after_t, before_t, svc.tz))
+
+        def keep(e: Event) -> bool:
+            return all(check(e) for check in checks)
+
         if view == "picks":
-            events = recommended(svc, min_score=min_score, start=start, end=end)
+            events = recommended(svc, min_score=min_score, start=start, end=end, keep=keep)
         else:
             where = {
                 "all": "status='ok'",
@@ -201,23 +252,17 @@ def create_app(svc: Service) -> FastAPI:
                 "filtered": "status='filtered'",
                 "unscored": "status='ok' AND score IS NULL",
             }.get(view, "status='ok'")
-            events = svc.db.upcoming_events(start, end, where)
+            events = [e for e in svc.db.upcoming_events(start, end, where) if keep(e)]
             if min_score is not None:
                 events = [e for e in events if (e.score or 0) >= min_score]
-        if q:
-            ql = q.lower()
-            events = [e for e in events if ql in f"{e.title} {e.description} {e.venue_name} {e.city}".lower()]
-        if max_miles is not None:
-            events = [e for e in events if e.distance_miles is not None and e.distance_miles <= max_miles]
-        if free:
-            events = [e for e in events if e.is_free or e.price_min == 0]
-        if tag:
-            events = [e for e in events if tag in e.tags or tag in e.categories]
         filters = {"q": q, "days": days or "", "date": day.isoformat() if day else "",
                    "min_score": min_score if min_score is not None else "",
-                   "max_miles": max_miles if max_miles is not None else "", "free": free, "tag": tag}
+                   "max_miles": max_miles if max_miles is not None else "", "free": free, "tag": tag,
+                   "after": after_t.strftime("%H:%M") if after_t else "",
+                   "before": before_t.strftime("%H:%M") if before_t else ""}
         return events, dict(
-            count=len(events), view=view, day=day, beyond_horizon=bool(day and day > last_day),
+            count=len(events), view=view, day=day, time_presets=TIME_PRESETS,
+            query=lambda **changes: _query(view, filters, **changes), beyond_horizon=bool(day and day > last_day),
             date_links=_date_links(today, last_day), today=today, last_day=last_day, filters=filters,
             all_tags=sorted({t for e in events for t in e.tags}),
             ics_url=feed_url(svc, "/calendar.ics"), starred_ics_url=feed_url(svc, "/calendar/starred.ics"),
@@ -225,14 +270,14 @@ def create_app(svc: Service) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
     def dashboard(view: str = "picks", q: str = "", days: str = "", date: str = "", min_score: str = "",
-                  max_miles: str = "", free: str = "", tag: str = ""):
-        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag)
+                  max_miles: str = "", free: str = "", tag: str = "", after: str = "", before: str = ""):
+        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag, after, before)
         return page("dashboard.html", groups=group_by_day(events, ctx["today"]), base_path="/", **ctx)
 
     @app.get("/map", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
     def map_page(view: str = "picks", q: str = "", days: str = "", date: str = "", min_score: str = "",
-                 max_miles: str = "", free: str = "", tag: str = ""):
-        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag)
+                 max_miles: str = "", free: str = "", tag: str = "", after: str = "", before: str = ""):
+        events, ctx = listing(view, q, days, date, min_score, max_miles, free, tag, after, before)
         places, unmapped = map_places(events, ctx["today"])
         return page("map.html", base_path="/map", places=places, unmapped=unmapped,
                     home={"lat": cfg.home.latitude, "lon": cfg.home.longitude, "label": cfg.home.label,

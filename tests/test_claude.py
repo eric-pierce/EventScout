@@ -14,7 +14,7 @@ from eventscout.llm.claude import ClaudeLLM
 def _sse(text: str, stop_reason: str = "end_turn") -> bytes:
     events = [
         ("message_start", {"type": "message_start", "message": {
-            "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5", "content": [],
+            "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5-5", "content": [],
             "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 50, "output_tokens": 1}}}),
         ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
         ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}}),
@@ -66,13 +66,15 @@ def test_json_request_shape(mock_api):
     assert out["results"][0]["score"] == 88
     body = captured["body"]
     assert captured["path"].startswith("/v1/messages")
-    assert body["model"] == "claude-opus-5"
+    assert body["model"] == "claude-opus-5-5"
     assert body["stream"] is True
     assert body["output_config"] == {"effort": "low", "format": {"type": "json_schema", "schema": schema}}
     assert body["fallbacks"] == "default"
     assert "server-side-fallback-2026-07-01" in captured["headers"].get("anthropic-beta", "")
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert llm.usage.input_tokens == 50 and llm.usage.output_tokens == 20
+    assert llm.usage.as_dict()["by_task"] == {"score": {"calls": 1, "input_tokens": 50, "output_tokens": 20,
+                                                        "cache_read_tokens": 0, "web_searches": 0}}
 
 
 def test_truncated_output_raises(mock_api):

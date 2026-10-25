@@ -138,7 +138,7 @@ or use a tool like Watchtower.
 ## Map view
 
 Picks, Browse and Going each have a **List / Map** switch. The map shows the same events with the same filters (date,
-search, score, distance, free, tag): one pin per venue, colored by its best score and sized by how many events
+start time, search, score, distance, free, tag): one pin per venue, colored by its best score and sized by how many events
 it has. Clicking a pin lists that venue's events. Your home and the search radius are drawn too. Events without an
 exact location are counted in the header but not drawn: online events, venues the geocoder couldn't find, and those
 only located to their city's centre. The map uses Leaflet and MapLibre (from the jsDelivr CDN, pinned with integrity
@@ -204,12 +204,15 @@ container user: `sudo chown 1000 config.yaml`. If it isn't writable, the Setting
 
 ## Configuration highlights (`config.yaml`)
 
-- `profile.interests`: weighted topics that drive ranking. Changing the profile re-scores upcoming events.
+- `profile.interests`: weighted topics that drive ranking. Changing interests, dislikes or notes re-scores upcoming
+  events; changing `min_score` or `exclude_keywords` doesn't.
 - `profile.dislikes`, `profile.notes`: soft preferences, e.g. "weeknights only after 6pm".
 - `profile.exclude_keywords`: hard filter.
 - `profile.min_score`: threshold for picks, email and the calendar feed.
 - `search`: `horizon_days`, `max_distance_miles`, `max_drive_minutes`, `max_price`, `include_online`.
-- `llm.claude.model`: defaults to `claude-opus-5` with low effort for extraction and scoring, high for discovery. For a cheaper setup, set `claude-sonnet-5`.
+- `llm.claude.model`: defaults to `claude-opus-5-5` with low effort for extraction and scoring, high for discovery.
+  `claude-sonnet-5-5` and `claude-haiku-5-5` cost less; compare their scores on your listings before switching.
+  The Runs page shows each run's tokens by task (reading pages, scoring, finding sources).
 - `llm.max_scored_per_run`: cost guard. The soonest events are scored first; the rest wait for the next run.
 - `sources`: seed list. The kind can be `auto`, which detects iCal / RSS / Localist / JSON-LD / LLM automatically.
 

@@ -44,13 +44,14 @@ class ClaudeLLM(LLM):
             kwargs["fallbacks"] = self.cfg.fallbacks
         return kwargs
 
-    def _record(self, resp: Any) -> None:
+    def _record(self, resp: Any, task: str) -> None:
         u = resp.usage
         searches = 0
         stu = getattr(u, "server_tool_use", None)
         if stu is not None:
             searches = getattr(stu, "web_search_requests", 0) or 0
         self.usage.add(
+            task=task,
             inp=u.input_tokens or 0,
             out=u.output_tokens or 0,
             cache_read=getattr(u, "cache_read_input_tokens", 0) or 0,
@@ -84,7 +85,7 @@ class ClaudeLLM(LLM):
                 resp = stream.get_final_message()
         except (anthropic.AnthropicError, TypeError) as exc:
             raise self._wrap(exc) from exc
-        self._record(resp)
+        self._record(resp, task)
         self._check(resp)
         text = next((b.text for b in resp.content if b.type == "text"), None)
         if text is None:
@@ -122,7 +123,7 @@ class ClaudeLLM(LLM):
                     resp = stream.get_final_message()
             except (anthropic.AnthropicError, TypeError) as exc:
                 raise self._wrap(exc) from exc
-            self._record(resp)
+            self._record(resp, "discover")
             if resp.stop_reason == "refusal":
                 self._check(resp)
             for block in resp.content:

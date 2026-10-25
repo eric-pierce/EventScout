@@ -291,10 +291,26 @@ def profile_text(profile: Profile) -> str:
     return "\n".join(lines)
 
 
-def score_system(profile: Profile) -> str:
+def feedback_text(feedback: list[dict]) -> str:
+    liked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] > 0][:20]
+    disliked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] < 0][:20]
+    fb = ""
+    if liked:
+        fb += "Events they liked:\n" + "\n".join(f"+ {x}" for x in liked) + "\n"
+    if disliked:
+        fb += "Events they marked not interested:\n" + "\n".join(f"- {x}" for x in disliked) + "\n"
+    return fb or "No feedback yet.\n"
+
+
+def score_system(profile: Profile, feedback: list[dict] | None = None) -> str:
+    """The scoring instructions, profile and feedback examples. Identical for every batch in a run, so the whole
+    thing is cached after the first batch (the events to rate go in the user message)."""
     return f"""You rate local events for one person based on how likely they are to want to attend.
 
 {profile_text(profile)}
+
+Their past feedback:
+{feedback_text(feedback or [])}
 
 Scoring guide:
 - 85-100: squarely matches a high-weight interest and is a notable/appealing instance of it.
@@ -365,15 +381,8 @@ def _explanation(r: dict, profile: Profile) -> dict:
 
 
 def score_events(llm: LLM, profile: Profile, events: list[Event], feedback: list[dict]) -> dict[int, Score]:
-    liked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] > 0][:20]
-    disliked = [f"{f['title']} @ {f['venue'] or '?'}" for f in feedback if f["value"] < 0][:20]
-    fb = ""
-    if liked:
-        fb += "Events they liked:\n" + "\n".join(f"+ {x}" for x in liked) + "\n"
-    if disliked:
-        fb += "Events they marked not interested:\n" + "\n".join(f"- {x}" for x in disliked) + "\n"
-    user = (fb or "No feedback yet.\n") + "\nRate each event:\n" + json.dumps([_event_brief(e) for e in events], ensure_ascii=False)
-    data = llm.json(system=score_system(profile), user=user, schema=SCORE_SCHEMA, task="score")
+    user = "Rate each event:\n" + json.dumps([_event_brief(e) for e in events], ensure_ascii=False)
+    data = llm.json(system=score_system(profile, feedback), user=user, schema=SCORE_SCHEMA, task="score")
     wanted = {e.id for e in events}
     out: dict[int, Score] = {}
     for r in data.get("results", []):

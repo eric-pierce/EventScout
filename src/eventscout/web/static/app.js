@@ -13,6 +13,13 @@
     return res.json();
   };
 
+  // Phones: the filter form folds away behind a Filters button.
+  const side = document.getElementById("side");
+  side?.querySelector(".filters-toggle")?.addEventListener("click", (e) => {
+    const open = side.classList.toggle("open");
+    e.currentTarget.setAttribute("aria-expanded", String(open));
+  });
+
   // Event feedback / starring
   document.addEventListener("click", async (e) => {
     const btn = e.target.closest(".act[data-action]");

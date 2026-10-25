@@ -31,7 +31,7 @@ class FakeLLM(LLM):
     def json(self, *, system, user, schema, task):
         self.calls.append(task)
         self.systems.append(system)
-        self.usage.add(inp=100, out=10)
+        self.usage.add(task=task, inp=100, out=10)
         if task == "score":
             import json as _json
 

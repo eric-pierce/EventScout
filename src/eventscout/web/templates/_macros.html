@@ -78,3 +78,20 @@
   {% endif %}
 </article>
 {%- endmacro %}
+
+{% macro llm_usage(u) -%}
+{#- Token use for one run or trip build, split by task, so the expensive steps are visible. -#}
+{%- set labels = {"extract": "Reading pages", "score": "Scoring", "discover": "Finding sources", "other": "Other"} -%}
+{%- if u and u.by_task %}
+<table class="usage">
+  <thead><tr><th>LLM task</th><th class="num">Calls</th><th class="num">Input</th><th class="num">Cached input</th><th class="num">Output</th></tr></thead>
+  <tbody>
+  {% for task, row in u.by_task.items() | sort(attribute='1.output_tokens', reverse=true) %}
+    <tr><td>{{ labels.get(task, task) }}{% if row.web_searches %} <span class="muted">· {{ row.web_searches }} web searches</span>{% endif %}</td>
+      <td class="num">{{ row.calls }}</td><td class="num">{{ '{:,}'.format(row.input_tokens) }}</td>
+      <td class="num">{{ '{:,}'.format(row.cache_read_tokens) }}</td><td class="num">{{ '{:,}'.format(row.output_tokens) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{%- endif %}
+{%- endmacro %}

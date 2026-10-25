@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_macros.html" import llm_usage %}
 {% set active = 'runs' %}
 {% block title %}Runs · EventScout{% endblock %}
 {% block content %}
@@ -13,9 +14,10 @@
       {% set st = r.stats %}
       {% if st.fetch %}<span class="muted">{{ st.fetch.sources }} sources · {{ st.fetch.unique_events }} events</span>{% endif %}
       {% if st.report %}<span class="muted">{{ st.report.recommended }} picks</span>{% endif %}
-      {% if st.llm %}<span class="muted">{{ st.llm.provider }}: {{ st.llm.calls }} calls, {{ '{:,}'.format(st.llm.input_tokens) }} in / {{ '{:,}'.format(st.llm.output_tokens) }} out tokens{% if st.llm.web_searches %}, {{ st.llm.web_searches }} searches{% endif %}</span>{% endif %}
+      {% if st.llm %}<span class="muted">{{ st.llm.model or st.llm.provider }}: {{ st.llm.calls }} calls, {{ '{:,}'.format(st.llm.input_tokens) }} in / {{ '{:,}'.format(st.llm.output_tokens) }} out tokens{% if st.llm.web_searches %}, {{ st.llm.web_searches }} searches{% endif %}</span>{% endif %}
       {% if st.seconds %}<span class="muted">{{ st.seconds }}s</span>{% endif %}
     </summary>
+    {{ llm_usage(r.stats.llm) }}
     <pre>{{ r.log }}</pre>
   </details>
   {% else %}

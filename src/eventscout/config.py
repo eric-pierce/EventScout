@@ -84,13 +84,21 @@ class Profile(BaseModel):
     min_score: int = 60
 
     def fingerprint(self) -> str:
-        """Changes whenever the profile changes, so events get re-scored."""
+        """Changes when what the scorer sees changes (interests, dislikes, notes), so events get re-scored.
+        min_score (the picks cut-off) and exclude_keywords (a filter applied before scoring) are left out:
+        changing them never needs a re-score."""
+        blob = json.dumps(self.model_dump(include={"interests", "dislikes", "notes"}), sort_keys=True)
+        return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+    def legacy_fingerprint(self) -> str:
+        """The fingerprint before min_score and exclude_keywords were left out. Scores saved under it are carried
+        over instead of paying for a full re-score after upgrading."""
         blob = json.dumps(self.model_dump(), sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
 class ClaudeConfig(BaseModel):
-    model: str = "claude-opus-5"
+    model: str = "claude-opus-5-5"
     effort_extract: str = "low"
     effort_score: str = "low"
     effort_discover: str = "high"

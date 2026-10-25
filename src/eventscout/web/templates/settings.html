@@ -49,7 +49,8 @@
         <button class="btn primary" type="submit" {% if read_only %}disabled{% endif %}>Save profile</button>
         <span class="status" id="profile-status"></span>
       </div>
-      <p class="muted small">Saved to <code>{{ config_path }}</code>. Changing the profile re-scores upcoming events on the next run, which uses the LLM.</p>
+      <p class="muted small">Saved to <code>{{ config_path }}</code>. Changing interests, dislikes or other preferences re-scores upcoming events on the next run, which uses the LLM;
+        the keyword filter and minimum score apply without re-scoring.</p>
     </form>
   </section>
 

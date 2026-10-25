@@ -24,7 +24,7 @@ from eventscout.config import Config, Home
 from eventscout.dates import now
 from eventscout.db import Database, domain_of
 from eventscout.http import Fetcher, FetchError
-from eventscout.llm import LLM, LLMError
+from eventscout.llm import LLM, LLMError, llm_model_name, usage_delta
 from eventscout.models import Source, Trip, dest_key_for
 from eventscout.pipeline import PipelineSteps, RunLog
 from eventscout.sources import Context
@@ -285,8 +285,8 @@ def build_trip(svc, trip_id: int) -> dict:
     finally:
         fetcher.close()
         if svc._llm is not None:
-            usage = svc._llm.usage.as_dict()
-            stats["llm"] = {"provider": svc._llm.name, **{k: usage[k] - usage_before.get(k, 0) for k in usage}}
+            stats["llm"] = {"provider": svc._llm.name, "model": llm_model_name(svc.cfg),
+                            **usage_delta(svc._llm.usage.as_dict(), usage_before)}
         stats["seconds"] = round(time.monotonic() - t0, 1)
         db.update_trip(trip_id, status=status, stats=stats, sources=source_log, log=rl.text(),
                        built_at=datetime.now(timezone.utc))

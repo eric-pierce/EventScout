@@ -19,7 +19,7 @@ from eventscout.filtering import hard_filter
 from eventscout.geo import Geo
 from eventscout.http import BlockedError, Fetcher, FetchError
 from eventscout.images import find_image
-from eventscout.llm import LLM, LLMError, make_llm
+from eventscout.llm import LLM, LLMError, llm_model_name, make_llm, usage_delta
 from eventscout.models import Event, Source
 from eventscout.sources import ADAPTERS, Context
 from eventscout.sources.jsonld import parse_jsonld_events
@@ -150,7 +150,7 @@ class PipelineSteps:
     def _score(self, ctx: Context, rl: RunLog) -> dict:
         profile = self.cfg.profile
         # New feedback steers scoring of new listings; `eventscout rescore` re-ranks everything with it.
-        fp = profile.fingerprint()
+        fp, legacy_fp = profile.fingerprint(), profile.legacy_fingerprint()
         feedback = self.db.feedback_examples()
         events = self._upcoming(ctx, "status = 'ok'")
         need: list[tuple[Event, str]] = []
@@ -159,7 +159,16 @@ class PipelineSteps:
             key = score_key(ev, fp)
             if ev.score_key == key and ev.score is not None:
                 continue
+            if ev.score is not None and ev.score_key == score_key(ev, legacy_fp):
+                # Scored under the old fingerprint with the same profile: carry the score over to the new key.
+                self.db.update_event(ev.id, score_key=key)
+                if not self.db.get_cached_score(key):
+                    self.db.put_cached_score(key, ev.score, ev.score_reason or "", ev.tags, ev.score_detail)
+                cached += 1
+                continue
             hit = self.db.get_cached_score(key)
+            if hit is None and (hit := self.db.get_cached_score(score_key(ev, legacy_fp))):
+                self.db.put_cached_score(key, *hit)
             if hit:
                 score, reason, tags, detail = hit
                 self.db.update_event(ev.id, score=score, score_reason=reason, tags=tags, score_detail=detail,
@@ -428,10 +437,8 @@ class Service(PipelineSteps):
         finally:
             fetcher.close()
             if self._llm is not None:
-                usage = self._llm.usage.as_dict()
-                if llm_usage_before:
-                    usage = {k: usage[k] - llm_usage_before.get(k, 0) for k in usage}
-                stats["llm"] = {"provider": self._llm.name, **usage}
+                usage = usage_delta(self._llm.usage.as_dict(), llm_usage_before)
+                stats["llm"] = {"provider": self._llm.name, "model": llm_model_name(cfg), **usage}
             stats["seconds"] = round(time.monotonic() - t0, 1)
             db.finish_run(run_id, status, stats, rl.text())
         rl(f"run complete in {stats['seconds']}s")

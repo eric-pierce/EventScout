@@ -19,6 +19,8 @@ from eventscout.report.ics import build_calendar
 from eventscout.report import mailer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from eventscout.pipeline import RunLog, Service
 
 log = logging.getLogger(__name__)
@@ -37,6 +39,14 @@ def _fmt_time(ev: Event) -> str:
     elif ev.end:
         s += " – " + ev.end.strftime("%b %-d")
     return s
+
+
+def _fmt_clock(hhmm: str) -> str:
+    """ "17:00" -> "5 PM", "09:30" -> "9:30 AM" (for the time filter)."""
+    try:
+        return datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p").replace(":00 ", " ")
+    except ValueError:
+        return hhmm
 
 
 def _fmt_day(d: date, today: date) -> str:
@@ -58,6 +68,7 @@ def _fmt_ts(value: object) -> str:
 
 env.filters["event_time"] = _fmt_time
 env.filters["ts"] = _fmt_ts
+env.filters["clock"] = _fmt_clock
 _CSS_PATH = Path(__file__).resolve().parent.parent / "web" / "static" / "style.css"
 env.globals["inline_css"] = lambda: _CSS_PATH.read_text()
 # Cache-busting token for /static assets, so browsers pick up new CSS/JS after an upgrade.
@@ -79,8 +90,10 @@ def group_by_day(events: list[Event], today: date) -> list[DayGroup]:
 
 
 def recommended(svc: "Service", *, days: int | None = None, min_score: int | None = None,
-                start: datetime | None = None, end: datetime | None = None) -> list[Event]:
-    """Picks between start (default: now) and end (default: start + days, or the search horizon)."""
+                start: datetime | None = None, end: datetime | None = None,
+                keep: "Callable[[Event], bool] | None" = None) -> list[Event]:
+    """Picks between start (default: now) and end (default: start + days, or the search horizon). `keep` narrows
+    them (the dashboard's filters) before the report.max_events cap, so a narrow filter still finds its best events."""
     cfg = svc.cfg
     start = start or now(svc.tz)
     end = end or start + timedelta(days=days or cfg.search.horizon_days)
@@ -88,6 +101,8 @@ def recommended(svc: "Service", *, days: int | None = None, min_score: int | Non
     events = svc.db.upcoming_events(start, end, "status='ok' AND feedback >= 0 AND (score >= %s OR starred)", (ms,))
     # drop events that already ended today
     events = [e for e in events if (e.end or e.start) >= start - timedelta(hours=1) or not e.time_known]
+    if keep is not None:
+        events = [e for e in events if keep(e)]
     events.sort(key=lambda e: -(e.score or 0))
     events = events[: cfg.report.max_events]
     events.sort(key=lambda e: e.start)
