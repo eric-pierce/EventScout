@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "_macros.html" import event_card with context %}
+{% set active = 'trips' %}
+{% block title %}{{ trip.city or trip.name }} · Trips · EventScout{% endblock %}
+{% block head %}
+  {% if show == 'map' %}
+  {% include "_map_head.html" %}
+  {% endif %}
+{% endblock %}
+{% block content %}
+<div class="page" id="trip" data-id="{{ trip.id }}" data-status="{{ trip.status }}">
+  <a class="muted small" href="/trips">← All trips</a>
+  <div class="list-head trip-head">
+    <div>
+      <h1>{{ trip.name }}</h1>
+      <span class="muted">{{ trip.dates_display }} · within {{ trip.radius_miles | round | int }} mi of {{ trip.near or 'the city centre' }} · times in {{ trip.timezone.replace('_', ' ') }}</span>
+    </div>
+    <div class="actions-row">
+      {% if trip.status == 'done' %}
+      <a class="btn" href="/trips/{{ trip.id }}/calendar.ics?view={{ view }}{% if cfg.report.feed_token %}&token={{ cfg.report.feed_token | urlencode }}{% endif %}">Download .ics</a>
+      {% endif %}
+      <button class="btn" data-trip-action="rebuild" {% if trip.status in ('queued', 'running') %}disabled{% endif %}>Rebuild</button>
+      <button class="btn danger" data-trip-action="delete" {% if trip.status == 'running' %}disabled{% endif %}>Delete</button>
+    </div>
+  </div>
+
+  {% if trip.status in ('queued', 'running') %}
+  <div class="panel building">
+    <h4>{{ 'Waiting for another trip to finish…' if trip.status == 'queued' else 'Building your report…' }}</h4>
+    <p class="muted small">Finding sources, fetching events, locating venues and ranking them for you. This usually takes a few minutes; the page updates when it's done.</p>
+    <pre id="trip-log">{{ trip.log }}</pre>
+  </div>
+  {% else %}
+    {% if trip.status == 'error' %}
+    <div class="banner warn"><b>The last build failed.</b> {{ (trip.log.splitlines() or [''])[-1] }} Rebuild to try again.</div>
+    {% endif %}
+
+    <div class="trip-toolbar">
+      <nav class="tabs" aria-label="Which events">
+        <a class="tab{% if view != 'all' %} on{% endif %}" href="?view=picks&show={{ show }}">Picks ({{ pick_count }})</a>
+        <a class="tab{% if view == 'all' %} on{% endif %}" href="?view=all&show={{ show }}">All ({{ all_count }})</a>
+      </nav>
+      <nav class="tabs" aria-label="Show as">
+        <a class="tab{% if show != 'map' %} on{% endif %}" href="?view={{ view }}&show=list">List</a>
+        <a class="tab{% if show == 'map' %} on{% endif %}" href="?view={{ view }}&show=map">Map</a>
+      </nav>
+    </div>
+    <p class="muted small">Ranked with your profile{% if feedback_count %} and {{ feedback_count }} past ▲ / ▼ ratings{% endif %}{% if trip.notes %}, plus this trip's notes: “{{ trip.notes }}”{% endif %}. Rating events here with ▲ / ▼ teaches the ranker for home too.</p>
+
+    {% if show == 'map' %}
+      <div id="map" class="map" aria-label="Map of events"></div>
+      <p class="map-legend muted small">
+        <span class="dot-key hi"></span>score 80+ <span class="dot-key mid"></span>{{ cfg.profile.min_score }}–79
+        <span class="dot-key lo"></span>lower / unscored · ringed dot: {{ trip.near or 'city centre' }} ·
+        dashed circle: {{ trip.radius_miles | round | int }} mi{% if unmapped %} · {{ unmapped }} without an exact location not shown{% endif %}
+      </p>
+      {% include "_map_scripts.html" %}
+    {% else %}
+      {% if not groups %}
+      <div class="empty">
+        <p>{{ 'No picks for these dates.' if view != 'all' else 'No events found for these dates.' }}</p>
+        {% if view != 'all' and all_count %}<p class="muted"><a href="?view=all">See all {{ all_count }} events</a>, or adjust your interests in Settings and rebuild.</p>{% endif %}
+      </div>
+      {% endif %}
+      {% for g in groups %}
+        <h2 class="day">{{ g.label }}</h2>
+        {% for e in g.events %}{{ event_card(e) }}{% endfor %}
+      {% endfor %}
+    {% endif %}
+
+    <section class="panel trip-sources" id="city-sources">
+      <h4>Sources for {{ trip.city }}</h4>
+      <p class="muted small">Used for every trip to {{ trip.city }}. Saved sources and switches apply the next time you build or
+        <b>Rebuild</b> a {{ trip.city }} trip.</p>
+      <table class="sources">
+        <thead><tr><th>Source</th><th>Type</th><th class="num">Last build</th><th></th></tr></thead>
+        <tbody>
+        {% for b in builtins %}
+          <tr class="{{ '' if b.enabled else 'st-disabled' }}">
+            <td><div class="sname">{{ b.name }}</div><a class="surl" href="{{ b.url }}" target="_blank" rel="noopener">{{ b.url }}</a>
+              {% if b.last and b.last.error %}<div class="err">{{ b.last.error }}</div>{% endif %}</td>
+            <td class="small">built-in</td>
+            <td class="num">{{ b.last.events if b.last else '—' }}</td>
+            <td class="row-actions"><button class="btn small" data-builtin="{{ b.builtin }}" data-enabled="{{ 'false' if b.enabled else 'true' }}">{{ 'Turn off' if b.enabled else 'Turn on' }}</button></td>
+          </tr>
+        {% endfor %}
+        {% for s in saved_sources %}
+          <tr class="{{ '' if s.enabled else 'st-disabled' }}">
+            <td><div class="sname">{{ s.name }}</div><a class="surl" href="{{ s.url }}" target="_blank" rel="noopener">{{ s.url }}</a>
+              {% if s.last_error %}<div class="err">{{ s.last_error }}</div>{% endif %}{% if s.notes %}<div class="muted small">{{ s.notes }}</div>{% endif %}</td>
+            <td class="small">saved · {{ s.kind }}</td>
+            <td class="num">{{ s.last_event_count if s.last_event_count is not none else 'not built yet' }}</td>
+            <td class="row-actions">
+              <button class="btn small" data-saved="{{ s.id }}" data-enabled="{{ 'false' if s.enabled else 'true' }}">{{ 'Turn off' if s.enabled else 'Turn on' }}</button>
+              <button class="btn small danger" data-saved-delete="{{ s.id }}">Remove</button>
+            </td>
+          </tr>
+        {% endfor %}
+        {% for f in found_sources %}
+          <tr>
+            <td><div class="sname">{{ f.name }}</div><a class="surl" href="{{ f.url }}" target="_blank" rel="noopener">{{ f.url }}</a>
+              {% if f.why %}<div class="muted small">{{ f.why }}</div>{% endif %}</td>
+            <td class="small">found by web search</td>
+            <td class="num">{{ f.events }}</td>
+            <td class="row-actions"><button class="btn small primary" data-save-found='{{ {"name": f.name, "url": f.url, "kind": f.kind, "why": f.why or ""} | tojson }}'>Save for {{ trip.city }}</button></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <form class="add-source" id="trip-source-form">
+        <input type="url" name="url" placeholder="https://… a {{ trip.city }} venue calendar, listings page, .ics or RSS feed" required>
+        <input type="text" name="name" placeholder="Name (optional)">
+        <button class="btn primary" type="submit">Add for {{ trip.city }}</button>
+        <span class="muted" id="trip-source-status"></span>
+      </form>
+      <details class="build-log">
+        <summary>Last build log{% if trip.built_at %} · {{ trip.built_at | ts }}{% endif %}</summary>
+        {% if trip.stats.get('llm') %}<p class="muted small">LLM: {{ trip.stats.llm.calls }} calls, {{ '{:,}'.format(trip.stats.llm.input_tokens) }} in / {{ '{:,}'.format(trip.stats.llm.output_tokens) }} out tokens{% if trip.stats.llm.web_searches %}, {{ trip.stats.llm.web_searches }} web searches{% endif %} · {{ trip.stats.get('seconds') }}s</p>{% endif %}
+        <pre class="trip-log-final">{{ trip.log }}</pre>
+      </details>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

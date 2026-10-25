@@ -2,8 +2,7 @@
 {% set active = view if view in ('picks', 'all', 'starred') else '' %}
 {% block title %}Map · EventScout{% endblock %}
 {% block head %}
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  {% include "_map_head.html" %}
 {% endblock %}
 {% block content %}
 <div class="layout">
@@ -26,8 +25,5 @@
     {% endif %}
   </section>
 </div>
-<script id="map-data" type="application/json">{{ {"places": places, "home": home, "tiles": tiles, "min_score": cfg.profile.min_score} | tojson }}</script>
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
-        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-<script src="/static/map.js?v={{ asset_v() }}"></script>
+{% include "_map_scripts.html" %}
 {% endblock %}

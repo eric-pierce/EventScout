@@ -419,18 +419,20 @@ newsletters with web calendars. Prefer the calendar/listing page URL itself, not
 Avoid social networks, ticket resale sites, and national directories without local filtering."""
 
 
-def discovery_brief(cfg: Config, known_domains: set[str]) -> str:
+def discovery_brief(cfg: Config, known_domains: set[str], focus: str | None = None) -> str:
+    nearby = f" (also consider: {', '.join(cfg.home.nearby)})" if cfg.home.nearby else ""
     return (
-        f"Home: {cfg.home.label} (also consider: {', '.join(cfg.home.nearby)}), within ~{cfg.search.max_distance_miles:.0f} miles.\n\n"
+        f"Area: {cfg.home.label}{nearby}, within ~{cfg.search.max_distance_miles:.0f} miles.\n"
+        + (f"{focus}\n" if focus else "") + "\n"
         f"{profile_text(cfg.profile)}\n\n"
         f"Already tracked domains (do not suggest these): {', '.join(sorted(known_domains)) or 'none'}\n"
         f"Blocked domains: {', '.join(cfg.discovery.blocked_domains)}"
     )
 
 
-def pick_candidates(llm: LLM, cfg: Config, material: str, known_domains: set[str]) -> list[dict]:
+def pick_candidates(llm: LLM, cfg: Config, material: str, known_domains: set[str], focus: str | None = None) -> list[dict]:
     user = (
-        discovery_brief(cfg, known_domains)
+        discovery_brief(cfg, known_domains, focus)
         + f"\n\nFrom the research material below, choose up to {cfg.discovery.max_candidates_per_run} of the most promising "
           "event-listing pages. Only use URLs that appear in the material.\n\n<material>\n" + material + "\n</material>"
     )

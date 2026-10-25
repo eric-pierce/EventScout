@@ -4,7 +4,17 @@
   const { places, home, tiles, min_score: minScore } = JSON.parse(document.getElementById("map-data").textContent);
 
   const map = L.map(el, { scrollWheelZoom: true });
-  L.tileLayer(tiles.url, { maxZoom: 19, attribution: tiles.attribution }).addTo(map);
+  const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  if (tiles.style && L.maplibreGL) {
+    // Vector basemap drawn by MapLibre; its credit line comes from the style.
+    L.maplibreGL({ style: dark ? tiles.dark_style : tiles.style }).addTo(map);
+    if (tiles.attribution) map.attributionControl.addAttribution(tiles.attribution);
+  } else if (tiles.url) {
+    // Raster tiles. Dark mode: the provider's dark tiles if set, otherwise the light ones dimmed with a CSS filter.
+    if (dark && !tiles.dark_url) el.classList.add("dim-tiles");
+    L.tileLayer(dark && tiles.dark_url ? tiles.dark_url : tiles.url,
+      { maxZoom: 19, subdomains: tiles.subdomains || "abc", attribution: tiles.attribution }).addTo(map);
+  }
 
   const css = getComputedStyle(document.documentElement);
   const color = (name) => css.getPropertyValue(name).trim();

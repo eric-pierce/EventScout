@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set active = 'trips' %}
+{% block title %}Trips · EventScout{% endblock %}
+{% block content %}
+<div class="page narrow">
+  <div class="list-head">
+    <h1>Trips</h1>
+    <span class="muted">One-time reports for a city you're visiting, ranked with your profile and your ▲ / ▼ history.</span>
+  </div>
+
+  <form id="trip-form" class="panel form">
+    <h4>Plan a trip</h4>
+    <label>Destination
+      <input type="text" name="destination" placeholder="Chicago, IL · Lisbon · Asheville, NC" required autocomplete="off"></label>
+    <div class="row3">
+      <label>From<input type="date" name="start_date" value="{{ default_start.isoformat() }}" min="{{ today.isoformat() }}" required></label>
+      <label>To<input type="date" name="end_date" value="{{ default_end.isoformat() }}" min="{{ today.isoformat() }}" required></label>
+      <label>Within (miles)<input type="number" name="radius_miles" value="10" min="1" max="100" step="1"></label>
+    </div>
+    <label>Staying near <span class="muted">(optional: a neighborhood, hotel or address; distances are measured from here)</span>
+      <input type="text" name="near" placeholder="e.g. Wicker Park"></label>
+    <label>Notes for this trip <span class="muted">(optional; these override your usual preferences)</span>
+      <textarea name="notes" rows="3" placeholder="No car. Free during the day. Travelling with a friend who loves food."></textarea></label>
+    {% if can_discover %}
+    <label class="check"><input type="checkbox" name="discover" checked>
+      Also search the web for local event calendars <span class="muted">(finds city-specific sources; uses the LLM's web search and takes a few extra minutes)</span></label>
+    {% endif %}
+    <div class="form-foot">
+      <button class="btn primary" type="submit">Build report</button>
+      <span class="status" id="trip-status"></span>
+    </div>
+  </form>
+
+  {% if destinations %}
+  <p class="muted small saved-cities">Saved sources:
+    {% for d in destinations %}<span class="chip">{{ d.label.split(',')[0] }} · {{ d.source_count }}{% if d.builtins_off %} · {{ d.builtins_off | length }} built-in off{% endif %}</span>{% endfor %}
+    · used automatically when you plan a trip there.</p>
+  {% endif %}
+
+  {% if trips %}
+  <h2 class="day">Your trips</h2>
+  {% for t in trips %}
+  <a class="trip-row" href="/trips/{{ t.id }}">
+    <div>
+      <div class="trip-name">{{ t.name }}</div>
+      <div class="muted small">{{ t.dates_display }} · within {{ t.radius_miles | round | int }} mi{% if t.near %} of {{ t.near }}{% endif %}</div>
+    </div>
+    <div class="trip-meta">
+      {% if t.status == 'done' %}<span class="muted small">{{ t.stats.get('picks', 0) }} picks · {{ t.event_count or 0 }} events</span>{% endif %}
+      <span class="pill {{ 'ok' if t.status == 'done' else t.status }}">{{ {'done': 'ready', 'queued': 'queued', 'running': 'building', 'error': 'failed'}.get(t.status, t.status) }}</span>
+    </div>
+  </a>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

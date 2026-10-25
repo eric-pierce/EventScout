@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+import re
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -45,6 +46,7 @@ class Event(RawEvent):
     """A stored event."""
 
     id: int
+    trip_id: int | None = None  # None for home events
     fingerprint: str
     source_ids: list[int] = Field(default_factory=list)
     source_names: list[str] = Field(default_factory=list)
@@ -118,3 +120,77 @@ class Source(BaseModel):
             d["options"] = json.loads(d["options"])
         d["options"] = d.get("options") or {}
         return cls.model_validate(d)
+
+
+class Trip(BaseModel):
+    """A one-time report for a city you're visiting."""
+
+    id: int
+    name: str
+    query: str
+    latitude: float
+    longitude: float
+    timezone: str
+    city: str | None = None
+    region: str | None = None
+    region_code: str | None = None  # e.g. "US-IL"
+    country: str | None = None
+    country_code: str | None = None  # e.g. "us"
+    start_date: date
+    end_date: date
+    radius_miles: float = 10
+    near: str | None = None
+    notes: str = ""
+    discover: bool = True
+    status: str = "queued"  # queued | running | done | error
+    sources: list[dict[str, Any]] = Field(default_factory=list)
+    stats: dict[str, Any] = Field(default_factory=dict)
+    log: str = ""
+    created_at: datetime
+    built_at: datetime | None = None
+    event_count: int | None = None
+
+    @property
+    def dest_key(self) -> str:
+        """Identity of the destination, shared by every trip to the same city: saved sources hang off this."""
+        city = re.sub(r"[^a-z0-9]+", "-", (self.city or self.name).lower()).strip("-")
+        return f"{city}|{(self.region_code or '').lower()}|{(self.country_code or '').lower()}"
+
+    @property
+    def nights(self) -> int:
+        return (self.end_date - self.start_date).days
+
+    @property
+    def dates_display(self) -> str:
+        s, e = self.start_date, self.end_date
+        if s == e:
+            return s.strftime("%a %b %-d, %Y")
+        if s.year == e.year and s.month == e.month:
+            return f"{s:%b %-d}–{e:%-d}, {e:%Y}"
+        return f"{s:%b %-d} – {e:%b %-d}, {e:%Y}"
+
+
+class Destination(BaseModel):
+    key: str
+    label: str
+    builtins_off: list[str] = Field(default_factory=list)
+    created_at: datetime
+    source_count: int | None = None
+
+
+class DestinationSource(BaseModel):
+    """A source saved for one city, used by every trip there."""
+
+    id: int
+    dest_key: str
+    name: str
+    url: str
+    kind: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+    origin: str = "manual"  # manual | discovered
+    notes: str | None = None
+    added_at: datetime
+    last_built_at: datetime | None = None
+    last_event_count: int | None = None
+    last_error: str | None = None

@@ -8,6 +8,7 @@ import secrets
 import threading
 from datetime import timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -18,6 +19,10 @@ from pydantic import BaseModel, ValidationError
 from eventscout.config import Profile
 from eventscout.configfile import ConfigFileError, text_hash
 from eventscout.dates import now
+from eventscout.models import Trip
+from eventscout.sources import Context
+from eventscout.trips import (TripError, build_trip, builtin_sources, geocode_place, trip_config, trip_events,
+                              trip_today, trip_window, validate_dates)
 from eventscout.detect import detect_kind, trial_fetch
 from eventscout.http import Fetcher, FetchError
 from eventscout.llm import LLMError
@@ -90,6 +95,27 @@ class NewSource(BaseModel):
 
 class SourceStatus(BaseModel):
     status: str
+
+
+class NewTrip(BaseModel):
+    destination: str
+    start_date: dt.date
+    end_date: dt.date
+    radius_miles: float = 10
+    near: str = ""
+    notes: str = ""
+    discover: bool = True
+
+
+class TripSource(BaseModel):
+    url: str
+    name: str = ""
+    kind: str | None = None  # given when saving a source the web search found (already checked)
+    why: str = ""
+
+
+class Enabled(BaseModel):
+    enabled: bool
 
 
 class RawConfig(BaseModel):
@@ -206,7 +232,7 @@ def create_app(svc: Service) -> FastAPI:
         return page("map.html", base_path="/map", places=places, unmapped=unmapped,
                     home={"lat": cfg.home.latitude, "lon": cfg.home.longitude, "label": cfg.home.label,
                           "radius_miles": cfg.search.max_distance_miles},
-                    tiles={"url": cfg.web.map_tile_url, "attribution": cfg.web.map_attribution}, **ctx)
+                    tiles=cfg.web.map_tiles(), **ctx)
 
     @app.get("/sources", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
     def sources_page():
@@ -326,6 +352,162 @@ def create_app(svc: Service) -> FastAPI:
         svc.db.delete_source(source_id)
         svc.reload_config()
         return {"ok": True}
+
+    # ------------------------------------------------------------------ trips
+    def start_trip_build(trip_id: int) -> None:
+        def build():
+            with svc.trip_lock:  # queued trips wait their turn
+                build_trip(svc, trip_id)
+
+        _bg(build)
+
+    @app.get("/trips", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def trips_page():
+        today = now(svc.tz).date()
+        return page("trips.html", trips=svc.db.list_trips(), today=today,
+                    destinations=[d for d in svc.db.list_destinations() if d.source_count or d.builtins_off],
+                    default_start=today + timedelta(days=7), default_end=today + timedelta(days=9),
+                    can_discover=cfg.discovery.enabled)
+
+    @app.post("/api/trips", dependencies=[Depends(require_auth)])
+    def create_trip(body: NewTrip):
+        try:
+            place = geocode_place(body.destination.strip(), cfg)
+            validate_dates(body.start_date, body.end_date, now(ZoneInfo(place.timezone)).date())
+            lat, lon = place.latitude, place.longitude
+            if body.near.strip():  # "staying near" moves the centre the radius is measured from
+                spot = geocode_place(f"{body.near.strip()}, {place.label}", cfg)
+                lat, lon = spot.latitude, spot.longitude
+        except TripError as exc:
+            raise HTTPException(422, str(exc))
+        trip_id = svc.db.create_trip(
+            name=place.label, query=body.destination.strip(), latitude=lat, longitude=lon, timezone=place.timezone,
+            city=place.name, region=place.region, region_code=place.region_code, country=place.country,
+            country_code=place.country_code, start_date=body.start_date, end_date=body.end_date,
+            radius_miles=max(1.0, min(body.radius_miles, 100.0)), near=body.near.strip() or None,
+            notes=body.notes.strip(), discover=body.discover and cfg.discovery.enabled,
+        )
+        start_trip_build(trip_id)
+        return {"id": trip_id, "name": place.label, "timezone": place.timezone}
+
+    def _trip_or_404(trip_id: int) -> Trip:
+        trip = svc.db.get_trip(trip_id)
+        if trip is None:
+            raise HTTPException(404, "no such trip")
+        return trip
+
+    @app.get("/trips/{trip_id}", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+    def trip_page(trip_id: int, view: str = "picks", show: str = "list"):
+        trip = _trip_or_404(trip_id)
+        everything = trip_events(svc.db, trip)
+        picks = [e for e in everything if (e.score or 0) >= cfg.profile.min_score or e.starred]
+        events = everything if view == "all" else picks
+        today = trip_today(trip)
+        places, unmapped = map_places(events, today)
+        dest = svc.db.ensure_destination(trip.dest_key, trip.name)
+        saved = svc.db.list_destination_sources(dest.key)
+        saved_urls = {s.url.rstrip("/") for s in saved}
+        last_run = {s.get("builtin"): s for s in trip.sources if s.get("origin") == "built-in"}
+        builtins = [{**b, "enabled": b["builtin"] not in dest.builtins_off, "last": last_run.get(b["builtin"])}
+                    for b in builtin_sources(trip, cfg)]
+        found = [s for s in trip.sources if s.get("origin") == "discovered" and s["url"].rstrip("/") not in saved_urls]
+        return page(
+            "trip.html", trip=trip, view=view, show=show, events=events, groups=group_by_day(events, today),
+            dest=dest, saved_sources=saved, builtins=builtins, found_sources=found,
+            pick_count=len(picks), all_count=len(everything), places=places, unmapped=unmapped,
+            home={"lat": trip.latitude, "lon": trip.longitude, "label": trip.near or trip.name,
+                  "radius_miles": trip.radius_miles},
+            tiles=cfg.web.map_tiles(),
+            feedback_count=len(svc.db.feedback_examples(200)),
+        )
+
+    @app.get("/api/trips/{trip_id}", dependencies=[Depends(require_auth)])
+    def trip_status(trip_id: int):
+        trip = _trip_or_404(trip_id)
+        return {"status": trip.status, "log": trip.log.splitlines()[-12:], "stats": trip.stats}
+
+    @app.post("/api/trips/{trip_id}/rebuild", dependencies=[Depends(require_auth)])
+    def rebuild_trip(trip_id: int):
+        trip = _trip_or_404(trip_id)
+        if trip.status in ("queued", "running"):
+            raise HTTPException(409, "this trip is already being built")
+        svc.db.update_trip(trip_id, status="queued")
+        start_trip_build(trip_id)
+        return {"ok": True}
+
+    # Saved sources belong to the trip's city, so every trip there (and every rebuild) uses them.
+    def _trip_source_or_404(trip: Trip, source_id: int):
+        src = svc.db.get_destination_source(source_id)
+        if src is None or src.dest_key != trip.dest_key:
+            raise HTTPException(404, "no such source for this city")
+        return src
+
+    @app.post("/api/trips/{trip_id}/sources", dependencies=[Depends(require_auth)])
+    def add_trip_source(trip_id: int, body: TripSource):
+        trip = _trip_or_404(trip_id)
+        dest = svc.db.ensure_destination(trip.dest_key, trip.name)
+        url = body.url.strip()
+        if body.kind:  # found by the web search during a build; it was already checked then
+            kind, note, found = body.kind, body.why or "found by web search", None
+        else:
+            fetcher = Fetcher(cfg.fetch)
+            try:
+                tcfg = trip_config(cfg, trip)
+                start, end = trip_window(trip)
+                ctx = Context(cfg=tcfg, fetcher=fetcher, llm_factory=lambda: svc.llm, window_start=start,
+                              window_end=end, db=svc.db)
+                det = detect_kind(url, fetcher, ctx)
+                found = len(trial_fetch(det, body.name or url, ctx))
+                url, kind, note = det.url, det.kind, det.note
+            except (FetchError, LLMError, ValueError) as exc:
+                raise HTTPException(422, f"Could not read that source: {exc}")
+            finally:
+                fetcher.close()
+        name = body.name.strip() or url.split("//", 1)[-1].split("/", 1)[0]
+        sid = svc.db.add_destination_source(dest.key, name, url, kind, origin="discovered" if body.kind else "manual",
+                                            notes=note)
+        if sid is None:
+            raise HTTPException(409, f"{trip.city} already has that source")
+        return {"id": sid, "kind": kind, "events_found": found}
+
+    @app.post("/api/trips/{trip_id}/sources/{source_id}", dependencies=[Depends(require_auth)])
+    def toggle_trip_source(trip_id: int, source_id: int, body: Enabled):
+        _trip_source_or_404(_trip_or_404(trip_id), source_id)
+        svc.db.update_destination_source(source_id, enabled=body.enabled)
+        return {"ok": True}
+
+    @app.delete("/api/trips/{trip_id}/sources/{source_id}", dependencies=[Depends(require_auth)])
+    def remove_trip_source(trip_id: int, source_id: int):
+        _trip_source_or_404(_trip_or_404(trip_id), source_id)
+        svc.db.delete_destination_source(source_id)
+        return {"ok": True}
+
+    @app.post("/api/trips/{trip_id}/builtins/{builtin}", dependencies=[Depends(require_auth)])
+    def toggle_trip_builtin(trip_id: int, builtin: str, body: Enabled):
+        trip = _trip_or_404(trip_id)
+        if builtin not in {b["builtin"] for b in builtin_sources(trip, cfg)}:
+            raise HTTPException(404, "no such built-in source")
+        svc.db.ensure_destination(trip.dest_key, trip.name)
+        svc.db.set_builtin_enabled(trip.dest_key, builtin, body.enabled)
+        return {"ok": True}
+
+    @app.delete("/api/trips/{trip_id}", dependencies=[Depends(require_auth)])
+    def delete_trip(trip_id: int):
+        trip = _trip_or_404(trip_id)
+        if trip.status == "running":
+            raise HTTPException(409, "wait for the build to finish before deleting this trip")
+        svc.db.delete_trip(trip_id)
+        return {"ok": True}
+
+    @app.get("/trips/{trip_id}/calendar.ics", dependencies=[Depends(require_feed_auth)])
+    def trip_ics(trip_id: int, view: str = "picks"):
+        trip = _trip_or_404(trip_id)
+        events = trip_events(svc.db, trip)
+        if view != "all":
+            events = [e for e in events if (e.score or 0) >= cfg.profile.min_score or e.starred]
+        name = f"EventScout — {trip.city or trip.name} {trip.start_date:%b %-d}"
+        return Response(build_calendar(events, name, cfg.report.public_base_url), media_type="text/calendar",
+                        headers={"Content-Disposition": f'attachment; filename="trip-{trip_id}.ics"'})
 
     # --------------------------------------------------------------- settings
     @app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_auth)])

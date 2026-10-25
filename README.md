@@ -141,9 +141,48 @@ Picks, Browse and Going each have a **List / Map** switch. The map shows the sam
 search, score, distance, free, tag): one pin per venue, colored by its best score and sized by how many events
 it has. Clicking a pin lists that venue's events. Your home and the search radius are drawn too. Events without an
 exact location are counted in the header but not drawn: online events, venues the geocoder couldn't find, and those
-only located to their city's centre. The map uses Leaflet (from the jsDelivr CDN, pinned with an integrity hash) and
-OpenStreetMap's public tiles; set `web.map_tile_url` and `web.map_attribution` in `config.yaml` to use another tile
-provider.
+only located to their city's centre. The map uses Leaflet and MapLibre (from the jsDelivr CDN, pinned with integrity
+hashes) to draw [OpenFreeMap](https://openfreemap.org)'s vector maps of OpenStreetMap data, in a light style and a
+matching dark style. OpenFreeMap needs no key, has no usage limits and welcomes apps like this one. Two other options
+don't work here. OpenStreetMap's own volunteer-run tile servers block apps of this kind ("Access blocked … tile usage
+policy"). CARTO's basemaps now need an API key and show "API key required" without one.
+
+To pick another OpenFreeMap style (`liberty`, `bright`, `positron`, `dark` or `fiord`) or any MapLibre style, set
+`web.map_style_url` and `web.map_style_url_dark`. To use a raster tile server instead, such as your own, set
+`web.map_tile_url` (`{z}/{x}/{y}`, optional `{s}` and `{r}`), optionally `web.map_tile_url_dark`, and
+`web.map_attribution` for its credit line. MapLibre then isn't loaded.
+
+## Trips
+
+**Trips** builds a one-time event report for a city you're visiting. It's ranked with the profile and ▲ / ▼ history
+you've built up at home. Enter a destination, the dates, a radius, optionally where you're staying (distances are
+measured from there), and notes for the trip (e.g. "no car, free all day"). The notes override your usual
+preferences for that report.
+
+A build runs the regular pipeline once, with the destination standing in for home:
+
+- **Sources:** Eventbrite for the city and dates, AllEvents, Meetup (US cities), Ticketmaster if you've configured a
+  key, and, if you tick it, a web search for local calendars with the trip dates in the prompt.
+- **Processing:** venues are located and distances measured from the trip's centre, your hard filters and the trip
+  radius apply, events are scored with your interests, feedback and trip notes, and the top picks get times, prices
+  and images from their own pages.
+- **The report:** Picks and All tabs, list and map, a `.ics` download, and the sources that were used. Times are shown
+  in the destination's time zone. Ratings you give on a trip report teach the ranker for home too.
+
+**Saved sources per city.** Each destination (city + state + country) keeps its own source list, reused by every
+trip there. On a trip's page, under *Sources for &lt;city&gt;*, you can:
+
+- **Add** a venue calendar, listings page, `.ics` or RSS feed. It's checked against the trip dates and saved for that city.
+- **Save** a source the web search found during a build.
+- **Switch** the built-in sources (Eventbrite, AllEvents, Meetup, Ticketmaster) on or off for that city.
+
+Changes apply the next time you build or rebuild a trip there. Visiting the same city again starts with that curated
+list, so a quick rebuild can stand in for web discovery.
+
+Trips are kept apart from home: their events never appear on the dashboard, in picks, email or calendar feeds, and
+they're deleted with the trip. Nothing about a trip refreshes on a schedule. **Rebuild** re-runs it on demand (cached
+locations, page extractions and scores make that quick). A build typically takes a few minutes: most of it is
+geocoding (OpenStreetMap allows one lookup per second) and LLM scoring.
 
 ## Settings in the dashboard
 

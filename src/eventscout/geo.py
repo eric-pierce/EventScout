@@ -25,13 +25,16 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
 
 class Geo:
+    # Nominatim allows one request per second per application, so the pacing is shared by every Geo in the process
+    # (e.g. a trip build running alongside the scheduled home run).
+    _rate_lock = threading.Lock()
+    _last = 0.0
+
     def __init__(self, cfg: Config, db: Database):
         self.cfg = cfg
         self.db = db
         self.home = (cfg.home.latitude, cfg.home.longitude)
         self.client = httpx.Client(headers={"User-Agent": cfg.fetch.user_agent}, timeout=20)
-        self._lock = threading.Lock()
-        self._last = 0.0
         self.lookups = 0
 
     def _nominatim(self, query: str) -> tuple[float | None, float | None] | None:
@@ -43,11 +46,11 @@ class Geo:
             return (None, None)
         if self.lookups >= self.cfg.geocoding.max_geocodes_per_run:
             return None
-        with self._lock:  # Nominatim policy: max 1 request/second
-            wait = 1.1 - (time.monotonic() - self._last)
+        with Geo._rate_lock:  # Nominatim policy: max 1 request/second
+            wait = 1.1 - (time.monotonic() - Geo._last)
             if wait > 0:
                 time.sleep(wait)
-            self._last = time.monotonic()
+            Geo._last = time.monotonic()
             self.lookups += 1
             lat, lon = self.home
             params = {

@@ -164,4 +164,80 @@
       setStatus(status, `Not saved: ${err.message}`, "err");
     }
   });
+
+  // Trips: plan a trip
+  const tripForm = document.getElementById("trip-form");
+  tripForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const status = document.getElementById("trip-status");
+    const f = tripForm.elements;
+    setStatus(status, "Looking up the destination…");
+    try {
+      const r = await post("/api/trips", {
+        destination: f.destination.value, start_date: f.start_date.value, end_date: f.end_date.value,
+        radius_miles: Number(f.radius_miles.value || 10), near: f.near.value, notes: f.notes.value,
+        discover: f.discover ? f.discover.checked : false,
+      });
+      location.href = `/trips/${r.id}`;
+    } catch (err) {
+      setStatus(status, err.message, "err");
+    }
+  });
+
+  // Trips: one report (live progress while building; rebuild / delete)
+  const trip = document.getElementById("trip");
+  if (trip) {
+    const id = trip.dataset.id;
+    if (["queued", "running"].includes(trip.dataset.status)) {
+      const logEl = document.getElementById("trip-log");
+      const timer = setInterval(async () => {
+        const st = await fetch(`/api/trips/${id}`).then((r) => r.json()).catch(() => null);
+        if (!st) return;
+        if (logEl) logEl.textContent = st.log.join("\n");
+        if (!["queued", "running"].includes(st.status)) { clearInterval(timer); location.reload(); }
+      }, 3000);
+    }
+    // This city's sources: add, save what the web search found, switch on/off, remove.
+    const srcForm = document.getElementById("trip-source-form");
+    srcForm?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("trip-source-status");
+      setStatus(status, "Checking the source against the trip dates…");
+      try {
+        const r = await post(`/api/trips/${id}/sources`, { url: srcForm.elements.url.value, name: srcForm.elements.name.value });
+        setStatus(status, `Saved as ${r.kind}: ${r.events_found} events on your dates. Rebuild to include it.`, "ok");
+        setTimeout(() => location.reload(), 1500);
+      } catch (err) { setStatus(status, `Not added: ${err.message}`, "err"); }
+    });
+    trip.querySelectorAll("[data-save-found]").forEach((b) => b.addEventListener("click", async () => {
+      try { await post(`/api/trips/${id}/sources`, JSON.parse(b.dataset.saveFound)); location.reload(); }
+      catch (err) { alert(err.message); }
+    }));
+    trip.querySelectorAll("[data-builtin]").forEach((b) => b.addEventListener("click", async () => {
+      try { await post(`/api/trips/${id}/builtins/${b.dataset.builtin}`, { enabled: b.dataset.enabled === "true" }); location.reload(); }
+      catch (err) { alert(err.message); }
+    }));
+    trip.querySelectorAll("[data-saved]").forEach((b) => b.addEventListener("click", async () => {
+      try { await post(`/api/trips/${id}/sources/${b.dataset.saved}`, { enabled: b.dataset.enabled === "true" }); location.reload(); }
+      catch (err) { alert(err.message); }
+    }));
+    trip.querySelectorAll("[data-saved-delete]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Remove this source from every trip to this city?")) return;
+      try { await post(`/api/trips/${id}/sources/${b.dataset.savedDelete}`, null, "DELETE"); location.reload(); }
+      catch (err) { alert(err.message); }
+    }));
+
+    trip.querySelectorAll("[data-trip-action]").forEach((b) => b.addEventListener("click", async () => {
+      try {
+        if (b.dataset.tripAction === "delete") {
+          if (!confirm("Delete this trip and its report?")) return;
+          await post(`/api/trips/${id}`, null, "DELETE");
+          location.href = "/trips";
+        } else {
+          await post(`/api/trips/${id}/rebuild`);
+          location.reload();
+        }
+      } catch (err) { alert(err.message); }
+    }));
+  }
 })();

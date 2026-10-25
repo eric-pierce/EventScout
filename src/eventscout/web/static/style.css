@@ -205,12 +205,39 @@ h2.day {
 .map-pop .score.mid { background: #fef3c7; color: #92400e; }
 .map-pop .star-on { color: #d97706; }
 @media (prefers-color-scheme: dark) {
-  .leaflet-tile-pane { filter: brightness(.65) invert(1) contrast(.9) hue-rotate(200deg) saturate(.3) brightness(.9); }
+  .map.dim-tiles .leaflet-tile-pane { filter: brightness(.65) invert(1) contrast(.9) hue-rotate(200deg) saturate(.3) brightness(.9); }
 }
 @media (max-width: 860px) {
   .map { height: 70vh; }
   .list-head .tabs { margin-left: 0; }
 }
+
+/* trips */
+.row3 { display: grid; grid-template-columns: 1fr 1fr 130px; gap: 10px; }
+.trip-row {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+}
+.trip-row:hover { text-decoration: none; border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.trip-name { font-weight: 650; }
+.trip-meta { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.trip-head { align-items: flex-start; margin-top: 6px; }
+.trip-head .actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.trip-toolbar { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 10px 0 4px; }
+.building pre, .trip-sources pre {
+  margin: 8px 0 0; padding: 10px; border-radius: 8px; background: var(--surface-2); font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; max-height: 260px; overflow: auto; color: var(--text-2);
+}
+.trip-sources { margin-top: 18px; }
+.trip-sources .add-source { margin-top: 12px; }
+.trip-sources tr.st-disabled td:not(.row-actions) { opacity: .55; }
+.build-log { margin-top: 12px; }
+.build-log summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+.saved-cities { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 2px 0; }
+.trip-sources summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-2); }
+.trip-sources table { margin-top: 10px; }
+.pill.queued { background: var(--surface-2); }
+@media (max-width: 860px) { .row3 { grid-template-columns: 1fr 1fr; } .row3 label:last-child { grid-column: 1 / -1; } }
 
 /* why this score */
 details.why { margin-top: 6px; font-size: 13px; }
@@ -277,6 +304,8 @@ details.run pre { margin: 0; padding: 12px 14px; border-top: 1px solid var(--bor
 .form label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--text-2); }
 .form label .muted { font-weight: 400; }
 .form label.inline { flex-direction: row; align-items: center; gap: 10px; }
+.form label.check { flex-direction: row; align-items: baseline; gap: 8px; font-weight: 500; }
+.form label.check input { flex: none; }
 .form textarea, .form input, .form select { font-weight: 400; }
 #add-interest { align-self: flex-start; }
 .form label.inline input { width: 90px; }

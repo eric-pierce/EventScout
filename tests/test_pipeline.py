@@ -320,6 +320,17 @@ def test_map_view_groups_events_by_venue(cfg, fake_adapter):
     assert "2 without an exact location not on the map" in r.text
     assert data["home"]["radius_miles"] == cfg.search.max_distance_miles
     assert 'integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="' in r.text
+    # OSM's volunteer tile servers block apps and CARTO now needs a key: OpenFreeMap vector styles by default.
+    assert data["tiles"]["style"].startswith("https://tiles.openfreemap.org/styles/")
+    assert data["tiles"]["dark_style"].endswith("/dark") and "url" not in data["tiles"]
+    assert "maplibre-gl@5.24.0/dist/maplibre-gl.js" in r.text and "leaflet-maplibre-gl.js" in r.text
+    # A raster tile server in the config replaces the styles, and MapLibre isn't loaded.
+    cfg.web.map_tile_url, cfg.web.map_attribution = "https://tiles.example.org/{z}/{x}/{y}.png", "© Example"
+    raster = client.get("/map?view=all").text
+    rdata = json.loads(re.search(r'<script id="map-data" type="application/json">(.*?)</script>', raster, re.S).group(1))
+    assert rdata["tiles"]["url"].startswith("https://tiles.example.org/") and "style" not in rdata["tiles"]
+    assert "maplibre" not in raster
+    cfg.web.map_tile_url = None
 
     # Same filters as the list: a date narrows the pins; the List/Map switch keeps the filters.
     day1 = at(1).date().isoformat()

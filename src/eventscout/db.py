@@ -23,7 +23,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool, PoolTimeout
 from rapidfuzz import fuzz
 
-from eventscout.models import Event, RawEvent, Source
+from eventscout.models import Destination, DestinationSource, Event, RawEvent, Source, Trip
 
 if TYPE_CHECKING:
     from eventscout.config import DatabaseConfig
@@ -48,8 +48,61 @@ CREATE TABLE IF NOT EXISTS sources (
     relevant_events INTEGER NOT NULL DEFAULT 0
 );
 
+-- One-time trip reports: events for a city you're visiting, kept apart from home events.
+CREATE TABLE IF NOT EXISTS trips (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT NOT NULL,
+    query TEXT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    timezone TEXT NOT NULL,
+    city TEXT,
+    region TEXT,
+    region_code TEXT,
+    country TEXT,
+    country_code TEXT,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    radius_miles DOUBLE PRECISION NOT NULL DEFAULT 10,
+    near TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    discover BOOLEAN NOT NULL DEFAULT true,
+    status TEXT NOT NULL DEFAULT 'queued',
+    sources JSONB NOT NULL DEFAULT '[]',
+    stats JSONB NOT NULL DEFAULT '{}',
+    log TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    built_at TIMESTAMPTZ
+);
+
+-- Saved per-city source lists, reused by every trip to that city (key: see models.Trip.dest_key).
+CREATE TABLE IF NOT EXISTS destinations (
+    key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    builtins_off JSONB NOT NULL DEFAULT '[]',  -- built-in sources switched off for this city
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS destination_sources (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    dest_key TEXT NOT NULL REFERENCES destinations(key) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    options JSONB NOT NULL DEFAULT '{}',
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    origin TEXT NOT NULL DEFAULT 'manual',  -- manual | discovered
+    notes TEXT,
+    added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_built_at TIMESTAMPTZ,
+    last_event_count INTEGER,
+    last_error TEXT,
+    UNIQUE (dest_key, url)
+);
+
 CREATE TABLE IF NOT EXISTS events (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    trip_id BIGINT REFERENCES trips(id) ON DELETE CASCADE,  -- NULL for home events
     fingerprint TEXT NOT NULL UNIQUE,
     title TEXT NOT NULL,
     norm_title TEXT NOT NULL,
@@ -154,11 +207,14 @@ MIGRATIONS = [
     'ALTER TABLE events ADD COLUMN IF NOT EXISTS image_checked BOOLEAN NOT NULL DEFAULT false',
     'ALTER TABLE events ADD COLUMN IF NOT EXISTS score_detail JSONB',
     'ALTER TABLE score_cache ADD COLUMN IF NOT EXISTS detail JSONB',
+    'ALTER TABLE events ADD COLUMN IF NOT EXISTS trip_id BIGINT REFERENCES trips(id) ON DELETE CASCADE',
+    'CREATE INDEX IF NOT EXISTS idx_events_trip_date ON events (trip_id, start_date)',
 ]
 
-_JSON_COLUMNS = {"categories", "tags", "source_ids", "source_names", "options", "stats", "score_detail"}
+_JSON_COLUMNS = {"categories", "tags", "source_ids", "source_names", "options", "stats", "score_detail", "sources",
+                 "builtins_off"}
 _BOOL_COLUMNS = {"all_day", "time_known", "location_approx", "online", "starred", "enriched", "geo_attempted",
-                 "image_checked", "is_free"}
+                 "image_checked", "is_free", "discover", "enabled"}
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 _STOPWORDS = {"the", "a", "an", "and", "at", "with", "of", "in", "on", "for", "live", "presents", "w", "feat", "ft"}
 
@@ -373,14 +429,17 @@ class Database:
             c.execute("DELETE FROM sources WHERE id = %s", (source_id,))
 
     # -------------------------------------------------------------- events
-    def upsert_event(self, ev: RawEvent, source: Source) -> int:
-        """Insert or merge an event. Near-duplicates (same day, similar title, close start) are merged."""
+    def upsert_event(self, ev: RawEvent, source: Source, trip_id: int | None = None) -> int:
+        """Insert or merge an event. Near-duplicates (same day, similar title, close start) are merged.
+        Home events (trip_id None) and each trip's events are deduplicated separately."""
         norm = normalize_title(ev.title)
         start_date = ev.start.date()
+        scope = f"trip{trip_id}:" if trip_id else ""
         with self.conn() as c:
             # Serialize merges for this day so two writers can't both decide "new" for the same event.
-            c.execute("SELECT pg_advisory_xact_lock(hashtext('eventscout-day:' || %s))", (start_date.isoformat(),))
-            candidates = c.execute("SELECT * FROM events WHERE start_date = %s", (start_date,)).fetchall()
+            c.execute("SELECT pg_advisory_xact_lock(hashtext('eventscout-day:' || %s))", (scope + start_date.isoformat(),))
+            candidates = c.execute("SELECT * FROM events WHERE start_date = %s AND trip_id IS NOT DISTINCT FROM %s",
+                                   (start_date, trip_id)).fetchall()
             match = None
             for row in candidates:
                 if row["norm_title"] == norm or fuzz.token_set_ratio(row["norm_title"], norm) >= 90:
@@ -393,16 +452,16 @@ class Database:
                         match = row
                         break
             if match is None:
-                fp = hashlib.sha1(f"{norm}|{start_date.isoformat()}|{(ev.venue_name or '').lower()}".encode()).hexdigest()
+                fp = hashlib.sha1(f"{scope}{norm}|{start_date.isoformat()}|{(ev.venue_name or '').lower()}".encode()).hexdigest()
                 return c.execute(
-                    """INSERT INTO events (fingerprint, title, norm_title, start, start_date, "end", all_day, time_known,
+                    """INSERT INTO events (trip_id, fingerprint, title, norm_title, start, start_date, "end", all_day, time_known,
                         description, venue_name, address, city, latitude, longitude, price_min, price_max, is_free,
                         cost_text, currency, url, image_url, categories, online, source_ids, source_names)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (fingerprint) DO UPDATE SET last_seen = now()
                        RETURNING id""",
                     (
-                        fp, ev.title, norm, ev.start, start_date, ev.end, ev.all_day, ev.time_known,
+                        trip_id, fp, ev.title, norm, ev.start, start_date, ev.end, ev.all_day, ev.time_known,
                         ev.description[:4000], ev.venue_name, ev.address, ev.city, ev.latitude, ev.longitude,
                         ev.price_min, ev.price_max, ev.is_free, ev.cost_text, ev.currency, ev.url, ev.image_url,
                         Jsonb(ev.categories), ev.online, Jsonb([source.id]), Jsonb([source.name]),
@@ -446,15 +505,16 @@ class Database:
             row = c.execute("SELECT * FROM events WHERE id = %s", (event_id,)).fetchone()
         return Event.from_row(row) if row else None
 
-    def upcoming_events(self, start: datetime, end: datetime, where: str = "", params: tuple = ()) -> list[Event]:
-        """Events whose start date falls in [start.date(), end.date()], optionally narrowed by a SQL `where`
-        fragment that uses %s placeholders (write a literal % as %%)."""
-        q = "SELECT * FROM events WHERE start_date >= %s AND start_date <= %s"
+    def upcoming_events(self, start: datetime, end: datetime, where: str = "", params: tuple = (),
+                        trip_id: int | None = None) -> list[Event]:
+        """Home events (or one trip's, with trip_id) whose start date falls in [start.date(), end.date()],
+        optionally narrowed by a SQL `where` fragment that uses %s placeholders (write a literal % as %%)."""
+        q = "SELECT * FROM events WHERE trip_id IS NOT DISTINCT FROM %s AND start_date >= %s AND start_date <= %s"
         if where:
             q += f" AND ({where})"
         q += " ORDER BY start"
         with self.conn() as c:
-            rows = c.execute(q, (start.date(), end.date(), *params)).fetchall()
+            rows = c.execute(q, (trip_id, start.date(), end.date(), *params)).fetchall()
         return [Event.from_row(r) for r in rows]
 
     def drop_generic_images(self, min_titles: int = 4) -> int:
@@ -471,7 +531,8 @@ class Database:
         """Drop old events that the user never interacted with."""
         with self.conn() as c:
             return c.execute(
-                "DELETE FROM events WHERE start_date < %s AND feedback = 0 AND NOT starred", (before.date(),)
+                "DELETE FROM events WHERE trip_id IS NULL AND start_date < %s AND feedback = 0 AND NOT starred",
+                (before.date(),)
             ).rowcount
 
     # ------------------------------------------------------------ feedback
@@ -567,6 +628,99 @@ class Database:
                 (key, minutes),
             )
 
+    # --------------------------------------------------------------- trips
+    def create_trip(self, **fields: Any) -> int:
+        cols, values = _set_clause(fields)
+        names = ", ".join(f'"{k}"' for k in fields)
+        with self.conn() as c:
+            return c.execute(f"INSERT INTO trips ({names}) VALUES ({', '.join(['%s'] * len(fields))}) RETURNING id",
+                             values).fetchone()["id"]
+
+    def get_trip(self, trip_id: int) -> Trip | None:
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM trips WHERE id = %s", (trip_id,)).fetchone()
+        return Trip.model_validate(dict(row)) if row else None
+
+    def list_trips(self) -> list[Trip]:
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT t.*, (SELECT count(*) FROM events e WHERE e.trip_id = t.id AND e.status = 'ok') AS event_count "
+                "FROM trips t ORDER BY t.start_date DESC, t.id DESC"
+            ).fetchall()
+        return [Trip.model_validate(dict(r)) for r in rows]
+
+    def update_trip(self, trip_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        cols, values = _set_clause(fields)
+        with self.conn() as c:
+            c.execute(f"UPDATE trips SET {cols} WHERE id = %s", (*values, trip_id))
+
+    def delete_trip(self, trip_id: int) -> None:
+        with self.conn() as c:  # its events go too (ON DELETE CASCADE)
+            c.execute("DELETE FROM trips WHERE id = %s", (trip_id,))
+
+    # -------------------------------------------------------- destinations
+    def ensure_destination(self, key: str, label: str) -> Destination:
+        with self.conn() as c:
+            c.execute("INSERT INTO destinations (key, label) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING", (key, label))
+            row = c.execute("SELECT * FROM destinations WHERE key = %s", (key,)).fetchone()
+        return Destination.model_validate(dict(row))
+
+    def get_destination(self, key: str) -> Destination | None:
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM destinations WHERE key = %s", (key,)).fetchone()
+        return Destination.model_validate(dict(row)) if row else None
+
+    def list_destinations(self) -> list[Destination]:
+        with self.conn() as c:
+            rows = c.execute(
+                "SELECT d.*, (SELECT count(*) FROM destination_sources s WHERE s.dest_key = d.key) AS source_count "
+                "FROM destinations d ORDER BY d.label"
+            ).fetchall()
+        return [Destination.model_validate(dict(r)) for r in rows]
+
+    def set_builtin_enabled(self, key: str, builtin: str, enabled: bool) -> None:
+        with self.conn() as c:
+            row = c.execute("SELECT builtins_off FROM destinations WHERE key = %s FOR UPDATE", (key,)).fetchone()
+            off = [b for b in (row["builtins_off"] if row else []) if b != builtin]
+            if not enabled:
+                off.append(builtin)
+            c.execute("UPDATE destinations SET builtins_off = %s WHERE key = %s", (Jsonb(sorted(off)), key))
+
+    def list_destination_sources(self, key: str, enabled_only: bool = False) -> list[DestinationSource]:
+        q = "SELECT * FROM destination_sources WHERE dest_key = %s" + (" AND enabled" if enabled_only else "")
+        with self.conn() as c:
+            rows = c.execute(q + " ORDER BY name", (key,)).fetchall()
+        return [DestinationSource.model_validate(dict(r)) for r in rows]
+
+    def add_destination_source(self, key: str, name: str, url: str, kind: str, options: dict | None = None,
+                               origin: str = "manual", notes: str | None = None) -> int | None:
+        """Returns the new id, or None if this city already has a source with that URL."""
+        with self.conn() as c:
+            row = c.execute(
+                "INSERT INTO destination_sources (dest_key, name, url, kind, options, origin, notes) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (dest_key, url) DO NOTHING RETURNING id",
+                (key, name, url, kind, Jsonb(options or {}), origin, notes),
+            ).fetchone()
+        return row["id"] if row else None
+
+    def get_destination_source(self, source_id: int) -> DestinationSource | None:
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM destination_sources WHERE id = %s", (source_id,)).fetchone()
+        return DestinationSource.model_validate(dict(row)) if row else None
+
+    def update_destination_source(self, source_id: int, **fields: Any) -> None:
+        if not fields:
+            return
+        cols, values = _set_clause(fields)
+        with self.conn() as c:
+            c.execute(f"UPDATE destination_sources SET {cols} WHERE id = %s", (*values, source_id))
+
+    def delete_destination_source(self, source_id: int) -> None:
+        with self.conn() as c:
+            c.execute("DELETE FROM destination_sources WHERE id = %s", (source_id,))
+
     # ---------------------------------------------------------------- runs
     def start_run(self, kind: str) -> int:
         with self.conn() as c:
@@ -585,7 +739,9 @@ class Database:
             return [dict(r) for r in c.execute("SELECT * FROM runs ORDER BY id DESC LIMIT %s", (limit,)).fetchall()]
 
     def mark_stale_runs(self) -> None:
-        """Runs left 'running' by a crash/restart are marked as aborted."""
+        """Runs (and trip builds) left 'running' by a crash/restart are marked as aborted."""
         with self.conn() as c:
             c.execute("UPDATE runs SET status = 'aborted', finished_at = now() WHERE status = 'running'")
+            c.execute("UPDATE trips SET status = 'error', log = log || E'\\nInterrupted by a restart; rebuild to finish.' "
+                      "WHERE status IN ('queued', 'running')")
 

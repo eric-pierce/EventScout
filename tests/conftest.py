@@ -26,9 +26,11 @@ class FakeLLM(LLM):
         super().__init__()
         self.extract_events = extract_events or []
         self.calls: list[str] = []
+        self.systems: list[str] = []
 
     def json(self, *, system, user, schema, task):
         self.calls.append(task)
+        self.systems.append(system)
         self.usage.add(inp=100, out=10)
         if task == "score":
             import json as _json

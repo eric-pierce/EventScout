@@ -130,6 +130,12 @@ web:
   port: 8080
   username: ${WEB_USERNAME:-}   # set both to require HTTP basic auth on the dashboard
   password: ${WEB_PASSWORD:-}
+  # Map basemap (defaults: OpenFreeMap's free vector styles, no key needed).
+  # map_style_url: https://tiles.openfreemap.org/styles/liberty
+  # map_style_url_dark: https://tiles.openfreemap.org/styles/dark
+  # Or a raster tile server instead:
+  # map_tile_url: https://tiles.example.org/{z}/{x}/{y}.png
+  # map_attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 
 # --- Seed sources ------------------------------------------------------------------
 # kind: auto | web | jsonld | ical | rss | localist | ticketmaster | bostonshows

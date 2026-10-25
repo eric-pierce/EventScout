@@ -23,6 +23,7 @@ dependencies = [
     "python-dateutil>=2.9",
     "pyyaml>=6.0",
     "rapidfuzz>=3.6",
+    "tzfpy>=1.0",
     "ruamel.yaml>=0.18",
     "recurring-ical-events>=3.0",
     "uvicorn>=0.29",

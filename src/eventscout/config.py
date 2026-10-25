@@ -188,10 +188,25 @@ class WebConfig(BaseModel):
     port: int = 8080
     username: str | None = None
     password: str | None = None
-    # Map view tiles. The default is OpenStreetMap's public server (fine for personal use); point this at another
-    # provider or your own tile server if you prefer.
-    map_tile_url: str = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-    map_attribution: str = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    # Map view basemap. Default: OpenFreeMap's vector styles (OpenStreetMap data; free, no key, no usage limits, and
+    # meant for apps like this; the credit line comes from the style). OpenStreetMap's own volunteer-run tile servers
+    # block apps like this one, and CARTO's basemaps now need a key, so neither is the default.
+    map_style_url: str | None = "https://tiles.openfreemap.org/styles/liberty"
+    map_style_url_dark: str | None = "https://tiles.openfreemap.org/styles/dark"
+    # Or a raster tile server (used instead of the styles when set): {s} = subdomain, {r} = "@2x" on high-DPI
+    # screens. Without map_tile_url_dark, dark mode dims the light tiles. map_attribution is the credit line.
+    map_tile_url: str | None = None
+    map_tile_url_dark: str | None = None
+    map_tile_subdomains: str = "abc"
+    map_attribution: str = ""
+
+    def map_tiles(self) -> dict[str, Any]:
+        """What the map page needs to draw the basemap: a raster tile server if one is set, else vector styles."""
+        if self.map_tile_url:
+            return {"url": self.map_tile_url, "dark_url": self.map_tile_url_dark,
+                    "subdomains": self.map_tile_subdomains, "attribution": self.map_attribution}
+        return {"style": self.map_style_url, "dark_style": self.map_style_url_dark or self.map_style_url,
+                "attribution": self.map_attribution}
 
 
 class SourceSeed(BaseModel):
